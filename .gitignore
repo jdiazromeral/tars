@@ -1,0 +1,16 @@
+# The vault (corpus + its own local-only git repo) — private data, never
+# tracked here so this tool repo stays shareable
+tesseract/
+
+# The SQLite index is a rebuildable cache (`tars reindex`), never source of truth
+tars.db
+tars.db-*
+
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+dist/
+
+# Obsidian editor/tool config — not knowledge content (lives in the markdown)
+.obsidian/

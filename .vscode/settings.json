@@ -1,0 +1,5 @@
+{
+  "files.exclude": {
+    "**/.pytest_cache": true
+  }
+}

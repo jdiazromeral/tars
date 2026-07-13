@@ -1,0 +1,19 @@
+{
+  "name": "tars",
+  "owner": {
+    "name": "Javi Díaz"
+  },
+  "metadata": {
+    "description": "TARS — local-first second brain",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "tars",
+      "source": "./",
+      "description": "Second-brain skills over the tars CLI and a private local vault — capture, ask, digest, tasks, promote, sync connectors, taxonomy gardening. The full set lives in skills/.",
+      "category": "productivity",
+      "tags": ["second-brain", "pkm", "capture", "knowledge"]
+    }
+  ]
+}
