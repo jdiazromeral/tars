@@ -327,6 +327,10 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     sweep has ingested everything. Ad-hoc pulls call neither, so they cannot move
     the watermark; a crash between the two leaves the live watermark untouched, so
     the next sweep simply re-scans from where it left off.
+
+    CONNECTOR is a free-form key: connectors that sweep several scopes keep one
+    watermark per scope with a namespaced key (e.g. `slack/<CHANNEL_ID>`), so
+    each scope brackets independently and one failure never stalls the rest.
     """
     if sum((value is not None, begin, commit)) > 1:
         raise click.ClickException("choose exactly one of --set / --begin / --commit")

@@ -25,6 +25,20 @@ trigger hasn't fired, building it early is scope, not progress.
   in `ingest.add` and rendered by `tars log`. Genuinely new state (frontmatter
   only keeps the latest `captured_at`), git-tracked like the rest of the
   vault's truth.
+- ~~**Slack channel sweep**~~ — shipped as Mode B of `tars:sync-slack`,
+  redesigned from the first (rejected) proposal: the write-time **LLM
+  relevance gate is gone**. Scope is a `connectors.yml` channel allowlist
+  (the human judgment, in config), selection inside it is deterministic
+  structural rules only (threads with replies; standalone messages above a
+  length/reaction bar; bot/join noise dropped by subtype) — the same species
+  of plumbing as gmail's `-category:promotions`, so the "no write-time
+  judgment" thesis holds and everything captured is raw. One two-phase
+  watermark per channel via namespaced cursor keys (`slack/<CHANNEL_ID>` —
+  zero CLI changes, `sync_state` keys were already free-form). Group DMs
+  opt in; 1:1 DMs never swept; excluded from `sync-all` by default. Note
+  for the armed **secret-filtering** trigger below: this is the first
+  connector that pulls whole channels, so the doctor credential-grep check
+  just got closer to firing.
 - **Inbox transport**: `inbox/` + `tars sweep` exist; pick a no-cloud file
   transport for mobile capture (Syncthing/Möbius syncing only `inbox/`) — or
   consciously skip if desktop capture proves sufficient.
