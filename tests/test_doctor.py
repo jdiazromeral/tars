@@ -69,6 +69,59 @@ def test_unhubbed_concept_is_flagged_until_hubs_runs(root):
     assert runner.invoke(main, ["doctor"]).exit_code == 0
 
 
+def test_ambiguous_stem_across_layers_is_flagged(root):
+    # A capture whose title slugs to an existing concept would shadow the hub
+    # in Obsidian's flat [[link]] namespace. Ingest now suffixes it, so the
+    # only way to get a clash is to create one by hand.
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "a",
+                         "--concept", "design-patterns"], input="body")
+    runner.invoke(main, ["hubs"])
+    assert runner.invoke(main, ["doctor"]).exit_code == 0
+
+    (path / "raw/web").mkdir(parents=True, exist_ok=True)
+    (path / "raw/web/design-patterns.md").write_text(
+        "---\nid: abc123\nconnector: web\norigin: https://example.com/dp\n"
+        "title: Design Patterns\naliases: []\ncaptured_at: 2026-07-01T00:00:00Z\n"
+        "tags: []\nconcepts: []\nmeta: {}\n---\n\nshadows the hub\n"
+    )
+    result = runner.invoke(main, ["doctor"])
+    assert result.exit_code == 1
+    assert "ambiguous-stem" in result.output
+    assert "[[design-patterns]]" in result.output
+    assert "raw/web/design-patterns.md" in result.output
+    assert "wiki/concepts/design-patterns.md" in result.output
+
+
+def test_ingest_will_not_shadow_a_concept_hub(root):
+    # The preventive half: same slug, but through the CLI. The capture gets an
+    # id suffix so the hub keeps the plain name and doctor stays clean.
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--origin", "note:seed", "--title", "seed",
+                         "--concept", "design-patterns"], input="body")
+    runner.invoke(main, ["hubs"])
+
+    add = runner.invoke(main, ["add", "-", "--origin", "note:dp",
+                               "--title", "Design Patterns"], input="the catalog page")
+    assert add.exit_code == 0, add.output
+    doc_id = add.output.split()[1]
+
+    assert not (path / "raw/note/design-patterns.md").exists()
+    assert (path / f"raw/note/design-patterns-{doc_id[:6]}.md").exists()
+    assert runner.invoke(main, ["doctor"]).exit_code == 0
+
+
+def test_reingest_keeps_its_own_unsuffixed_name(root):
+    # Guard the ownership short-circuit: a doc that already owns the plain
+    # name must not drift to a suffixed one when its content is updated.
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "Alpha"], input="v1")
+    runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "Alpha"], input="v2")
+
+    assert "v2" in (path / "raw/note/alpha.md").read_text()
+    assert sorted(p.name for p in path.glob("raw/note/alpha*.md")) == ["alpha.md"]
+
+
 def test_db_drift_when_raw_file_missing_from_index(root):
     path, runner = root
     runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "a"], input="body")

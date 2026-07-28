@@ -39,10 +39,7 @@ class Finding:
 
 
 def _valid_link_targets(root: Path) -> set[str]:
-    targets = {f.stem for f in store.iter_raw(root)}
-    for layer in (store.CONCEPTS_DIR, store.PEOPLE_DIR, store.NOTES_DIR, store.TASKS_DIR):
-        targets.update(p.stem for p in (root / layer).glob("*.md"))
-    return targets
+    return {f.stem for f in store.linkable_files(root)}
 
 
 def dangling_links(root: Path) -> list[Finding]:
@@ -57,6 +54,27 @@ def dangling_links(root: Path) -> list[Finding]:
                         "dangling-link", str(md.relative_to(root)),
                         f"[[{stem}]] has no matching file",
                     ))
+    return findings
+
+
+def ambiguous_stems(root: Path) -> list[Finding]:
+    """Two files sharing a basename across layers. `dangling_links` can't see
+    this — it folds stems into a set, so a collision looks like one valid
+    target — yet every [[stem]] link to the pair resolves arbitrarily and the
+    graph grows a duplicate node. Which file keeps the plain name is a
+    judgment call, so doctor names the clash and leaves the rename alone."""
+    owners: dict[str, list[str]] = {}
+    for path in store.linkable_files(root):
+        owners.setdefault(path.stem, []).append(str(path.relative_to(root)))
+    findings = []
+    for stem, paths in sorted(owners.items()):
+        if len(paths) > 1:
+            first, *rest = sorted(paths)
+            findings.append(Finding(
+                "ambiguous-stem", first,
+                f"[[{stem}]] also matches {', '.join(rest)} — links to it resolve "
+                "arbitrarily; rename one, then `tars reindex && tars hubs`",
+            ))
     return findings
 
 
@@ -102,4 +120,5 @@ def db_drift(root: Path, db: sqlite3.Connection) -> list[Finding]:
 
 
 def run(root: Path, db: sqlite3.Connection) -> list[Finding]:
-    return [*dangling_links(root), *unhubbed_concepts(root, db), *db_drift(root, db)]
+    return [*dangling_links(root), *ambiguous_stems(root),
+            *unhubbed_concepts(root, db), *db_drift(root, db)]

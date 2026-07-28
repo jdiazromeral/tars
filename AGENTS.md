@@ -74,7 +74,12 @@ tars.db                           disposable index — tars reindex rebuilds it
 - **Raw files are named by human title** (slug, collision-suffixed with a
   short id; fixed at first ingest so links never break). The doc id lives in
   frontmatter and the DB as the idempotence key — filenames and
-  `[[wiki-links]]` are for humans, ids are for machines.
+  `[[wiki-links]]` are for humans, ids are for machines. **Filenames share one
+  flat namespace across layers** — Obsidian resolves `[[stem]]` by basename,
+  ignoring directories — so the collision check spans the whole vault, not the
+  connector dir: a capture titled "Design Patterns" gets the id suffix rather
+  than shadowing the `design-patterns` concept hub. `tars doctor` flags any
+  clash that slips in by hand (`ambiguous-stem`).
 - **Concepts (`wiki/concepts/`) are the vault's grouping**: hub pages (short
   description + `## Notes` + `## Sources`) that everything shelves under.
   Every capture gets 1–4 concepts (`--concept` on add, or `tars tag` after);
@@ -191,10 +196,11 @@ properties — keep them straight:
   `tars sync <connector>`, `tars normalize`, `tars reindex`, `tars migrate`,
   `tars backup [dir] [--keep N]`, `tars doctor [--json]`, `tars status`.
 - **`tars doctor`** checks vault invariants — dangling `[[wiki-links]]`
-  (including a task left citing a doc `tars rm` deleted), concepts with
-  shelved docs but no hub page, and DB↔raw drift. Read-only: it names the
-  problem and the fix command (`tars reindex` / `tars hubs`), never mutates
-  anything. Exits non-zero when it finds issues.
+  (including a task left citing a doc `tars rm` deleted), two files sharing a
+  basename across layers (`ambiguous-stem` — every link to it resolves
+  arbitrarily), concepts with shelved docs but no hub page, and DB↔raw drift.
+  Read-only: it names the problem and the fix command (`tars reindex` /
+  `tars hubs`), never mutates anything. Exits non-zero when it finds issues.
 - At the start of a session (or when asked to capture), glance at `inbox/` —
   pending drops mean `tars sweep`, then shelve what landed (concepts + hubs)
   like any capture.

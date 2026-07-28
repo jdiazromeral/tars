@@ -201,8 +201,13 @@ def raw_path_for(root: Path, doc: RawDoc, existing: str | None = None) -> Path:
     conn_dir = root / RAW_DIR / slugify(doc.connector)
     base = slugify(doc.title) if doc.title else doc.id
     candidate = conn_dir / f"{base}.md"
-    if candidate.exists() and _file_doc_id(candidate) != doc.id:
-        candidate = conn_dir / f"{base}-{doc.id[:6]}.md"
+    if candidate.exists() and _file_doc_id(candidate) == doc.id:
+        return candidate  # this doc already owns the name
+    # Collisions are checked across the whole vault, not just this connector
+    # dir: a capture titled "Design Patterns" must not shadow the concept hub
+    # of the same slug, or every [[design-patterns]] link becomes ambiguous.
+    if any(f.stem == base for f in linkable_files(root)):
+        return conn_dir / f"{base}-{doc.id[:6]}.md"
     return candidate
 
 
@@ -281,6 +286,21 @@ def read_raw(content_md: Path) -> RawDoc:
 
 def iter_raw(root: Path):
     yield from sorted((root / RAW_DIR).glob("*/*.md"))
+
+
+# Layers whose filenames own a name in the vault's flat wiki-link namespace.
+# Obsidian resolves [[stem]] by basename across the whole vault, ignoring
+# directories, so a raw capture and a concept hub sharing a stem are two graph
+# nodes competing for every link to that name. Digests are excluded: they link
+# out, nothing links back at them.
+LINKABLE_LAYERS = (CONCEPTS_DIR, PEOPLE_DIR, NOTES_DIR, TASKS_DIR)
+
+
+def linkable_files(root: Path):
+    """Every file that owns a stem in the flat [[wiki-link]] namespace."""
+    yield from iter_raw(root)
+    for layer in LINKABLE_LAYERS:
+        yield from sorted((root / layer).glob("*.md"))
 
 
 def slugify(title: str) -> str:

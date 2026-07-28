@@ -267,7 +267,9 @@ every digest entry, task, and note that came out of it; open a note and
   data. Hub membership is a derived view, not something anyone hand-maintains.
 - `tars doctor [--json]` — checks the vault satisfies its own invariants:
   dangling `[[wiki-links]]` (including a task left citing a doc `tars rm`
-  deleted), concepts with shelved docs but no hub page, and DB↔raw drift.
+  deleted), two files sharing a basename across layers (links resolve
+  arbitrarily and the graph grows a duplicate node), concepts with shelved
+  docs but no hub page, and DB↔raw drift.
   Read-only — reports the fix (`tars reindex` / `tars hubs`), never mutates;
   exits non-zero when it finds issues, so it's scriptable.
 - `tars finalize` — the one-step finisher for any sync or edit batch:
