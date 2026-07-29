@@ -208,7 +208,7 @@ message qualifies on what is *attached to* it, never on what it is *about*. If
 a channel needs different thresholds, that belongs in `connectors.yml` or the
 vault's `AGENTS.md` house rules — never in ad-hoc per-run judgment. And the
 residual gap is deliberate: a short, unadorned, genuinely important message
-("Google confirmed the badge ships Monday") has no structural signal at all and
+("the vendor confirmed it ships Monday") has no structural signal at all and
 will be missed. Mode A is the answer to that — the sweep is a safety net, not a
 replacement for deliberate capture.
 
