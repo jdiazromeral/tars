@@ -49,6 +49,28 @@ trigger hasn't fired, building it early is scope, not progress.
   for the armed **secret-filtering** trigger below: this is the first
   connector that pulls whole channels, so the doctor credential-grep check
   just got closer to firing.
+- **Slack attachment *content*** — **trigger already fired**, and this is a
+  known incompleteness in the sweep above, not a hypothetical. An attachment is
+  one of the signals that admits a standalone message, yet only its metadata is
+  captured (`Attachments:` line); the bytes stay in Slack. The dry run found the
+  concrete case: a 167-char courtesy message carrying a 9.4 MB strategy deck
+  from Google's product lead — admitted *because* of the artifact, then stored
+  without it. A pointer with no target is worse than a skip, because it reads
+  like coverage. Deliberately deferred out of the sweep PR because the design
+  questions are real and deserve their own review:
+  - **Identity**: `slack-file:<FILE_ID>`, or reuse the content-addressed `file`
+    connector (`file:<hash>`)? The latter dedupes the same PDF arriving by
+    Slack *and* email — probably the right answer.
+  - **Coverage is partial, and unevenly**: `extract.py` handles pdf/html/text,
+    so decks and specs work — but **not images**, which are Slack's most common
+    attachment. Screenshots (an eval result, a dashboard) would still be
+    admitted by the signal and remain unreadable without vision/OCR. Say so
+    rather than implying full coverage.
+  - Bidirectional wiki-links (thread doc ↔ file doc), size caps, and what to do
+    with video.
+  - **Interacts with secret-filtering**: whole channels *plus their files* is
+    exactly how a stray `.env` or a PII csv reaches the vault. Sequence that
+    check first, or at least alongside.
 - **Inbox transport**: `inbox/` + `tars sweep` exist; pick a no-cloud file
   transport for mobile capture (Syncthing/Möbius syncing only `inbox/`) — or
   consciously skip if desktop capture proves sufficient.

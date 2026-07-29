@@ -61,10 +61,19 @@ complete, verbatim, chronological:
 ### <author> — <ISO timestamp>
 
 <message text verbatim>
+
+Attachments: <filename> (<mimetype>, <size>) — file_id <FILE_ID>
 ```
 
 - Subject: a short phrase from the parent message — judgment, but naming,
   not summarizing. Title: `slack <#channel> <YYYY-MM-DD> <subject>`.
+- **Attachments: record the metadata, always.** The `Attachments:` line goes on
+  any message that has one (omit it entirely when there are none). Their
+  *content* is **not** ingested yet — see the ROADMAP item — so this line is
+  the whole record that an artifact existed, and without it a two-line message
+  carrying a strategy deck captures as a bare courtesy sentence, which reads
+  like full coverage of something the corpus never took. Naming the file makes
+  it searchable and the omission auditable.
 - **People**: wiki-link authors with a `wiki/people/` page (`[[<slug>|<Name>]]`);
   backfill blank `slack:` identity fields with handles you see. Create a NEW
   page only for a 1:1 counterpart, a commitment owner, or someone recurring
