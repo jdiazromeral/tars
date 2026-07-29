@@ -113,7 +113,10 @@ slack:
     - C0FGHIJ5678
   include_group_dms: false     # mpim sweep — off by default, opt in per vault
   window_days: 30              # first-run backfill per channel (no watermark yet)
-  min_standalone_chars: 280    # standalone (unthreaded) msg length floor
+  # Standalone (unthreaded) messages need ONE of the B3 signals; these tune
+  # the two that take a number. Everything else is signal-present-or-not.
+  min_standalone_chars: 280    # weakest fallback signal — length alone
+  min_reactions: 2             # how many distinct reactions count as endorsed
 ```
 
 If the block is missing or `channels` is empty, stop and tell the user to add
@@ -150,16 +153,39 @@ exhausted, and select by **structural rules only** (mechanical, config-tunable
   all replies via `slack_read_thread`), even if the parent predates the
   watermark (a reply inside the window makes the thread current — the upsert
   refreshes it).
-- **Standalone messages** — no replies: capture as a thread-of-one only when
-  `len(text) ≥ min_standalone_chars` (announcement-length) **or** it carries
-  ≥ 2 emoji reactions (the channel reacted — someone found it load-bearing).
-  Below both bars: skip. Greetings and one-liners die here, deterministically.
-- **Always drop**: bot/app messages, join/leave/topic events (subtype-tagged
-  — mechanical to detect).
+- **Standalone messages** — no replies: capture as a thread-of-one when **any
+  one** of these signals is present. Each is a mark a *human* left on the
+  message, read straight off the Slack payload — never an opinion about the
+  topic:
+  - **an attachment** — a file or image (someone shipped an artifact);
+  - **≥ `min_reactions` distinct reactions** — the channel endorsed it;
+  - **pinned** — an explicit importance marker;
+  - **a link** — it points at an artifact outside Slack (PR, ticket, doc,
+    dashboard, backoffice);
+  - **a broadcast mention** (`@channel` / `@here`) — composed as an
+    announcement;
+  - **`len(text)` ≥ `min_standalone_chars`** — the weakest signal, and a
+    fallback only. Length is a poor proxy for importance (a courtesy sentence
+    can carry a strategy deck; a long message can be a rant), so it is last,
+    not first.
 
-These thresholds are plumbing, the same species as gmail's category filter.
-If a channel needs different bars, that belongs in `connectors.yml` or the
-vault's `AGENTS.md` house rules — never in ad-hoc per-run judgment.
+  No signal at all: skip. Greetings and one-liners die here, deterministically.
+- **Always drop**: bot/app messages, join/leave/topic/rename events
+  (subtype-tagged — mechanical to detect).
+
+The signals are deliberately **permissive**, because the costs are asymmetric:
+in a capture-raw corpus a false positive costs bytes that FTS will simply never
+match, while a false negative is content permanently absent from the brain. So
+when a signal is ambiguous, it admits.
+
+These rules are plumbing, the same species as gmail's category filter — a
+message qualifies on what is *attached to* it, never on what it is *about*. If
+a channel needs different thresholds, that belongs in `connectors.yml` or the
+vault's `AGENTS.md` house rules — never in ad-hoc per-run judgment. And the
+residual gap is deliberate: a short, unadorned, genuinely important message
+("Google confirmed the badge ships Monday") has no structural signal at all and
+will be missed. Mode A is the answer to that — the sweep is a safety net, not a
+replacement for deliberate capture.
 
 ## B4. Capture
 
@@ -181,10 +207,13 @@ beats a suffixed one.
 ## B5. Finalize and report
 
 After all channels: `tars finalize` once. Then report per channel: threads
-added / updated / unchanged, standalones captured vs skipped (with which bar
-skipped them), the new watermark or "uncommitted — errored", people
-linked/backfilled, concepts created vs reused. Name every skipped or failed
-item class explicitly — silent truncation reads as coverage.
+added / updated / unchanged, standalones captured **with the signal that
+admitted each** (attachment / reactions / pinned / link / broadcast / length)
+and how many were skipped for having none, the new watermark or "uncommitted —
+errored", people linked/backfilled, concepts created vs reused. Naming the
+admitting signal is what makes the thresholds tunable from evidence instead of
+taste. Name every skipped or failed item class explicitly — silent truncation
+reads as coverage.
 
 ---
 

@@ -341,9 +341,11 @@ connectors come in two styles:
     this thread". **Mode B** ("sweep slack channels"): an incremental sweep
     of a `connectors.yml` **channel allowlist**, one two-phase watermark per
     channel (`tars cursor slack/<CHANNEL_ID>`), selecting by deterministic
-    structural rules (threads with replies; standalone messages only above a
-    length/reaction bar) — no model decides what to keep; the allowlist is
-    the human judgment, like gmail's category filter. Group DMs opt in via
+    structural rules (threads with replies; standalone messages when they
+    carry a human's mark — attachment, reactions, pin, link, broadcast, or
+    length as the weak fallback) — a message qualifies on what is attached to
+    it, never on what it is about, so no model decides what to keep; the
+    allowlist is the human judgment, like gmail's category filter. Group DMs opt in via
     `include_group_dms`; **1:1 DMs are never swept**. Origin
     `slack:<channel>/<ts>` either way, so hand-captured and swept threads
     upsert instead of duplicating. There is no CLI code behind it — the
