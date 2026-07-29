@@ -30,13 +30,19 @@ trigger hasn't fired, building it early is scope, not progress.
   relevance gate is gone**. Scope is a `connectors.yml` channel allowlist
   (the human judgment, in config), selection inside it is deterministic
   structural rules only (threads with replies; standalone messages when they
-  carry a human's mark — attachment, reactions, pin, link, broadcast, length
-  last as a weak fallback; bot/join noise dropped by subtype) — a message
-  qualifies on what is *attached to* it, never on what it is *about*, the same
-  species of plumbing as gmail's `-category:promotions`, so the "no write-time
-  judgment" thesis holds and everything captured is raw. Signals are
-  permissive on purpose: a false positive costs bytes FTS never matches, a
-  false negative is permanently absent. One two-phase
+  carry a human's mark — attachment, reactions, pin, a link to a surface no
+  other connector covers, length last as a weak fallback; bot/join noise
+  dropped by subtype) — a message qualifies on what is *attached to* it, never
+  on what it is *about*, the same species of plumbing as gmail's
+  `-category:promotions`, so the "no write-time judgment" thesis holds and
+  everything captured is raw. Signals are permissive on purpose: a false
+  positive costs bytes FTS never matches, a false negative is permanently
+  absent. Two dry runs over real channels calibrated the set — they cut a
+  proposed broadcast-mention signal (0 useful hits of 4) and turned links into
+  anti-signals when they point at a connector-covered domain, since a "review
+  this PR" stub only competes with the fully-ingested PR. They also showed
+  signal yield is a property of the channel: sweep where decisions are
+  announced, not where work is coordinated. One two-phase
   watermark per channel via namespaced cursor keys (`slack/<CHANNEL_ID>` —
   zero CLI changes, `sync_state` keys were already free-form). Group DMs
   opt in; 1:1 DMs never swept; excluded from `sync-all` by default. Note

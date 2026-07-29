@@ -113,10 +113,14 @@ slack:
     - C0FGHIJ5678
   include_group_dms: false     # mpim sweep — off by default, opt in per vault
   window_days: 30              # first-run backfill per channel (no watermark yet)
-  # Standalone (unthreaded) messages need ONE of the B3 signals; these tune
-  # the two that take a number. Everything else is signal-present-or-not.
+  # Standalone (unthreaded) messages need ONE of the B3 signals; these tune it.
   min_standalone_chars: 280    # weakest fallback signal — length alone
-  min_reactions: 2             # how many distinct reactions count as endorsed
+  min_reactions: 2             # distinct reactions that count as endorsed;
+                               # raise for chatty channels (2 is social reflex)
+  redundant_domains:           # a link here is an ANTI-signal: the artifact is
+    - github.com               # already ingested whole by another connector,
+    - atlassian.net            # so the Slack stub only competes with it
+
 ```
 
 If the block is missing or `channels` is empty, stop and tell the user to add
@@ -157,17 +161,29 @@ exhausted, and select by **structural rules only** (mechanical, config-tunable
   one** of these signals is present. Each is a mark a *human* left on the
   message, read straight off the Slack payload — never an opinion about the
   topic:
-  - **an attachment** — a file or image (someone shipped an artifact);
-  - **≥ `min_reactions` distinct reactions** — the channel endorsed it;
+  - **an attachment** — a file or image (someone shipped an artifact). The
+    strongest signal in practice: it is the only one that catches a two-word
+    message carrying a strategy deck or an eval screenshot;
+  - **≥ `min_reactions` distinct reactions** — the channel endorsed it. Raise
+    this per vault for chatty channels, where two 👍 is social reflex rather
+    than endorsement;
   - **pinned** — an explicit importance marker;
-  - **a link** — it points at an artifact outside Slack (PR, ticket, doc,
-    dashboard, backoffice);
-  - **a broadcast mention** (`@channel` / `@here`) — composed as an
-    announcement;
+  - **a link to a surface no other connector covers.** A link is only a
+    signal when it points at something the corpus cannot already get in
+    better shape. A link to a `redundant_domains` entry is an **anti-signal**:
+    it says the real artifact lives in a connector that ingests it whole (a PR
+    with its full review discussion, an issue with its comments), so a
+    "review this please" stub adds no knowledge and competes with the good
+    document in FTS. Links to docs, specs, dashboards and wiki pages still
+    count;
   - **`len(text)` ≥ `min_standalone_chars`** — the weakest signal, and a
     fallback only. Length is a poor proxy for importance (a courtesy sentence
     can carry a strategy deck; a long message can be a rant), so it is last,
     not first.
+
+  There is deliberately **no broadcast-mention signal**. It was proposed and
+  cut on evidence: dry-run over a real squad channel, every single
+  `@here`/`@channel` hit was ritual logistics ("@here daily?"), 0 for 4.
 
   No signal at all: skip. Greetings and one-liners die here, deterministically.
 - **Always drop**: bot/app messages, join/leave/topic/rename events
@@ -208,7 +224,7 @@ beats a suffixed one.
 
 After all channels: `tars finalize` once. Then report per channel: threads
 added / updated / unchanged, standalones captured **with the signal that
-admitted each** (attachment / reactions / pinned / link / broadcast / length)
+admitted each** (attachment / reactions / pinned / link / length)
 and how many were skipped for having none, the new watermark or "uncommitted —
 errored", people linked/backfilled, concepts created vs reused. Naming the
 admitting signal is what makes the thresholds tunable from evidence instead of
@@ -225,6 +241,17 @@ reads as coverage.
   synthesis happens at query time. If a channel turns out too noisy, the fix
   is removing it from the allowlist (and `tars rm` for regrets), not a
   smarter gate.
+- **Signal yield is a property of the channel, not of the rules** — measured,
+  not assumed. Dry-running the same rules over two real channels: an
+  announcement-style channel yielded 9 documents in 30 days, nearly all
+  durable; a squad coordination channel yielded ~27, of which 2 were durable,
+  ~14 were stubs pointing at PRs/issues another connector already had, and the
+  rest was banter that happened to clear a bar. **Coordination channels are
+  poor sweep targets** precisely because their durable content is a
+  by-product that lives in GitHub and Jira — which are swept properly. Sweep
+  where decisions are *announced*, not where work is *coordinated*; and when a
+  channel disappoints, that is the allowlist doing its job, not a reason for a
+  cleverer filter.
 - **sync-all**: the sweep is NOT part of the default `sync-all` set — run it
   with "sweep slack channels" (or "sync all including slack" explicitly).
   Deliberate Mode A capture remains the default Slack posture.

@@ -342,10 +342,13 @@ connectors come in two styles:
     of a `connectors.yml` **channel allowlist**, one two-phase watermark per
     channel (`tars cursor slack/<CHANNEL_ID>`), selecting by deterministic
     structural rules (threads with replies; standalone messages when they
-    carry a human's mark — attachment, reactions, pin, link, broadcast, or
-    length as the weak fallback) — a message qualifies on what is attached to
-    it, never on what it is about, so no model decides what to keep; the
-    allowlist is the human judgment, like gmail's category filter. Group DMs opt in via
+    carry a human's mark — attachment, reactions, pin, a link to a surface no
+    other connector already covers, or length as the weak fallback) — a
+    message qualifies on what is attached to it, never on what it is about, so
+    no model decides what to keep; the allowlist is the human judgment, like
+    gmail's category filter. Sweep channels where decisions are *announced*,
+    not where work is *coordinated* — the latter's durable content already
+    arrives via the github and jira connectors. Group DMs opt in via
     `include_group_dms`; **1:1 DMs are never swept**. Origin
     `slack:<channel>/<ts>` either way, so hand-captured and swept threads
     upsert instead of duplicating. There is no CLI code behind it — the
