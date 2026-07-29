@@ -171,6 +171,13 @@ content). Re-sweeps refresh grown threads and no-op on unchanged ones.
 Process channels sequentially and threads within a channel one at a time
 (fetch → assemble → add) — never batch-zip parallel lists.
 
+A sweep is the corpus's first *bulk* capture path, so the flat filename
+namespace matters here more than anywhere (per AGENTS.md: Obsidian resolves
+`[[stem]]` by basename, so the collision check spans the whole vault). Keep
+thread subjects distinctive rather than generic — the CLI disambiguates with an
+id suffix and `tars doctor` flags any `ambiguous-stem`, but a readable stem
+beats a suffixed one.
+
 ## B5. Finalize and report
 
 After all channels: `tars finalize` once. Then report per channel: threads
