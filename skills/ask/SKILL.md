@@ -20,12 +20,9 @@ never the default (one meeting capture can be ~30k tokens).
    entity names, ticket keys); `--connector` narrows.
 3. **Escalate per document, not per question** — only when a hit's chunk isn't
    enough:
-   - `tars show <doc_id> --grep "<term>" -C 5` — the lines around every match
-     (numbered, so you can re-aim with a wider `-C`).
-   - `tars show <doc_id> --head 40` — frontmatter + opening (a meeting's Notes
-     panel sits at the top).
-   - Full `tars show <doc_id>` only when the answer genuinely needs the whole
-     document.
+   - Instead of using the CLI to read the document, look at the `connector` and `file` keys in the JSON search result.
+   - Construct the path: `$TARS_HOME/raw/<connector>/<file>.md`
+   - Use your native file-reading tools to read the file directly from disk. Read only the first ~40 lines (frontmatter + opening) unless the answer genuinely requires the full document.
    Also grep `wiki/notes/` — promoted insights outrank raw captures when they
    conflict.
 4. **Log vocabulary misses.** If the first phrasing found nothing useful and a
