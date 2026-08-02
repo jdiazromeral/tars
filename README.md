@@ -102,6 +102,16 @@ guarantees agent sessions resolve the vault no matter how they were launched
 then from any repo: *"save this"*, *"sync granola"*, *"what do we know
 about…"* all hit the same vault.
 
+### 4. Antigravity (`agy`), from anywhere
+
+The agent skills are natively compatible with Google Antigravity. To install them globally, simply symlink this repository into your `agy` plugins directory:
+
+```sh
+ln -s /absolute/path/to/this/repo ~/.gemini/config/plugins/tars
+```
+
+Make sure your shell profile exports `TARS_HOME` so the agent can find the vault. Once symlinked, all `tars:` skills will load in every session automatically.
+
 ### Try it
 
 ```sh
@@ -124,10 +134,9 @@ which tars         # the CLI on PATH (e.g. ~/.local/bin/tars)
 tars status        # docs per connector + sync state — proves the vault actually resolves
 ```
 
-In a Claude Code session, `/plugin` lists `tars@tars` as enabled and the
-`tars:` skills fire on the trigger phrases below. If they don't, restart the
-session (plugins load at startup) and confirm `enabledPlugins` in
-`~/.claude/settings.json`. Once all three pass, TARS is live everywhere — the
+In a Claude Code session, `/plugin` lists `tars@tars` as enabled; in Antigravity, the `tars` plugin is loaded from your config directory.
+In both, the `tars:` skills fire on the trigger phrases below. If they don't, restart the
+session (plugins load at startup) and confirm your plugin settings. Once all three pass, TARS is live everywhere — the
 repo you happen to be in never matters.
 
 ## How to use it

@@ -1,0 +1,12 @@
+{
+  "name": "tars",
+  "description": "TARS Answers from Raw Sources — local-first second brain: capture, ask, digest, sync connectors, taxonomy gardening. Skills call the `tars` CLI; the vault is found via TARS_HOME.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Javi Díaz",
+    "url": "https://github.com/jdiazromeral"
+  },
+  "homepage": "https://github.com/jdiazromeral/tars",
+  "repository": "https://github.com/jdiazromeral/tars",
+  "keywords": ["second-brain", "pkm", "knowledge-base", "granola", "jira", "obsidian"]
+}
