@@ -80,6 +80,14 @@ tars.db                           disposable index — tars reindex rebuilds it
   connector dir: a capture titled "Design Patterns" gets the id suffix rather
   than shadowing the `design-patterns` concept hub. `tars doctor` flags any
   clash that slips in by hand (`ambiguous-stem`).
+- **Dated streams put the date in the title, so it survives in the filename.**
+  `granola` (`<YYYY-MM-DD> <title>`) and `activity` (`<YYYY-MM-DD> Activity`,
+  written by the `track` skill) name the day the work *happened*. This is not
+  cosmetic: `tars list --since` filters on `captured_at` — when a document
+  landed — which drifts from the event date whenever a sync runs late or a
+  mutable slot is re-written. Any date-scoped read (the daily and weekly
+  activity views, `end-of-day`) globs those filename prefixes; `--since` stays
+  the right tool only for undated streams, where it's a proxy and known to be one.
 - **Concepts (`wiki/concepts/`) are the vault's grouping**: hub pages (short
   description + `## Notes` + `## Sources`) that everything shelves under.
   Every capture gets 1–4 concepts (`--concept` on add, or `tars tag` after);
