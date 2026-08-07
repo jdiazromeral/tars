@@ -14,6 +14,7 @@ from . import doctor as doctor_mod
 from . import extract, hubs as hubs_mod, ingest, ingestlog, normalize as normalize_mod
 from . import search as search_mod, store, view
 from .connectors import CONNECTORS
+from .connectors import slack as slack_mod
 from .store import RawDoc
 
 
@@ -676,3 +677,35 @@ def status():
     click.echo(f"notes: {len(notes)}")
     for row in db.execute("SELECT connector, last_sync FROM sync_state ORDER BY connector"):
         click.echo(f"sync {row['connector']}: last {row['last_sync']}")
+
+
+@main.group()
+def slack():
+    """Slack sweep helpers. Selection is code; the MCP does the transport."""
+
+
+@slack.command("select")
+@click.option("--channel", required=True, help="Channel ID being swept (checked against the allowlist).")
+@click.option("--channel-type", default="public_channel", show_default=True,
+              help="public_channel | private_channel | mpim | im.")
+def slack_select(channel: str, channel_type: str):
+    """Pick which messages of a fetched window become captured threads.
+
+    Reads `conversations.history` JSON on stdin (a list, or an object with a
+    `messages` key) and writes the selection as JSON on stdout, so the skill
+    never has to apply the rules by reading English.
+    """
+    root, _ = _open()
+    try:
+        cfg = slack_mod.load_config(root)
+        slack_mod.validate_channel(channel, channel_type, cfg)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc))
+    payload = json.loads(sys.stdin.read() or "[]")
+    messages = payload.get("messages", []) if isinstance(payload, dict) else payload
+    report = slack_mod.select(messages, cfg)
+    click.echo(json.dumps({
+        "selected": [vars(s) for s in report.selected],
+        "skipped": report.skipped,
+        "truncated": report.truncated,
+    }, indent=2))

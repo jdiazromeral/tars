@@ -120,21 +120,24 @@ slack:
   channels:                    # allowlist of channel IDs (required, non-empty)
     - C0ABCDE1234              #   e.g. #my-squad-channel
     - C0FGHIJ5678
-  include_group_dms: false     # mpim sweep — off by default, opt in per vault
+  include_group_dms: false     # mpim sweep — deliberate privacy speed bump:
+                               # a group DM needs BOTH this flag and its ID above
   window_days: 30              # first-run backfill per channel (no watermark yet)
-  # Standalone (unthreaded) messages need ONE of the B3 signals; these tune it.
+  refresh_days: 14             # how far back B3's refresh pass re-reads threads
+  max_threads_per_run: 40      # cap per run; 0 = uncapped
   min_standalone_chars: 280    # weakest fallback signal — length alone
-  min_reactions: 2             # distinct reactions that count as endorsed;
-                               # raise for chatty channels (2 is social reflex)
-  redundant_domains:           # a link here is an ANTI-signal: the artifact is
-    - github.com               # already ingested whole by another connector,
-    - atlassian.net            # so the Slack stub only competes with it
-
+  min_reactions: 2             # total reactors (sum of counts), not distinct
+                               # emoji; raise for chatty channels
+  redundant_link_patterns:     # a link matching one of these is an ANTI-signal:
+    - github.com/acme/*/pull/* # that exact artifact is already ingested whole by
+    - acme.atlassian.net/browse/*  # another connector, so the stub only competes
 ```
 
-If the block is missing or `channels` is empty, stop and tell the user to add
-an allowlist (offer to resolve channel IDs from names via
-`slack_search_channels`). Group DMs (`mpim`) are swept only when
+The schema, its defaults and this refusal are **code**, not prose:
+`connectors/slack.py:load_config()` raises when `channels` is missing or empty,
+exactly as github's does. Don't hand-parse the file — let the CLI fail. If it
+does, tell the user to add an allowlist (offer to resolve channel IDs from
+names via `slack_search_channels`). Group DMs (`mpim`) are swept only when
 `include_group_dms: true` AND their IDs are in `channels`. **1:1 DMs (`im`)
 are never swept** — those are Mode A, by direct request only: a DM is someone's
 half-private conversation.
@@ -156,61 +159,59 @@ cursor uncommitted (next sweep re-scans it) without holding back the others.
 First run on a channel (empty cursor): backfill `window_days`. Mode A captures
 never touch these cursors.
 
-## B3. Discover threads in the window
+## B3. Discover threads — the CLI selects, you don't
 
 Per channel, page `slack_read_channel` with `oldest=<watermark>` until
-exhausted, and select by **structural rules only** (mechanical, config-tunable
-— not semantic judgment):
+exhausted, then hand the raw history to the CLI and capture what it returns:
 
-- **Threads** — any message with `reply_count ≥ 1`: capture whole (parent +
-  all replies via `slack_read_thread`), even if the parent predates the
-  watermark (a reply inside the window makes the thread current — the upsert
-  refreshes it).
-- **Standalone messages** — no replies: capture as a thread-of-one when **any
-  one** of these signals is present. Each is a mark a *human* left on the
-  message, read straight off the Slack payload — never an opinion about the
-  topic:
-  - **an attachment** — a file or image (someone shipped an artifact). The
-    strongest signal in practice: it is the only one that catches a two-word
-    message carrying a strategy deck or an eval screenshot;
-  - **≥ `min_reactions` distinct reactions** — the channel endorsed it. Raise
-    this per vault for chatty channels, where two 👍 is social reflex rather
-    than endorsement;
-  - **pinned** — an explicit importance marker;
-  - **a link to a surface no other connector covers.** A link is only a
-    signal when it points at something the corpus cannot already get in
-    better shape. A link to a `redundant_domains` entry is an **anti-signal**:
-    it says the real artifact lives in a connector that ingests it whole (a PR
-    with its full review discussion, an issue with its comments), so a
-    "review this please" stub adds no knowledge and competes with the good
-    document in FTS. Links to docs, specs, dashboards and wiki pages still
-    count;
-  - **`len(text)` ≥ `min_standalone_chars`** — the weakest signal, and a
-    fallback only. Length is a poor proxy for importance (a courtesy sentence
-    can carry a strategy deck; a long message can be a rant), so it is last,
-    not first.
+```sh
+echo '<conversations.history JSON>' \
+  | tars slack select --channel <CHANNEL_ID> --channel-type <public_channel|private_channel|mpim>
+```
 
-  There is deliberately **no broadcast-mention signal**. It was proposed and
-  cut on evidence: dry-run over a real squad channel, every single
-  `@here`/`@channel` hit was ritual logistics ("@here daily?"), 0 for 4.
+It answers `{selected: [{thread_ts, signal, reply_count, reaction_total}],
+skipped: {reason: n}, truncated: bool}`.
 
-  No signal at all: skip. Greetings and one-liners die here, deterministically.
-- **Always drop**: bot/app messages, join/leave/topic/rename events
-  (subtype-tagged — mechanical to detect).
+**Do not re-derive the rules here.** They live in
+`connectors/slack.py:select()` and are covered by `tests/test_slack_select.py`
+— a deterministic rule executed by a model reading English is only as
+deterministic as the model's mood, and per AGENTS.md plumbing is code. For
+review, the rules it applies are: threads (`reply_count ≥ 1`) always; a
+standalone message on any one human-left mark — attachment, `min_reactions`
+reactors, pinned, a link *not* matching `redundant_link_patterns`, or length
+last; bots and channel-bookkeeping subtypes dropped. Signals are permissive
+because the costs are asymmetric (a false positive costs bytes FTS never
+matches; a false negative is permanently absent), and the anti-signal nullifies
+**only** the link signal — an attachment plus a link to an ingested PR still
+qualifies, on the attachment.
 
-The signals are deliberately **permissive**, because the costs are asymmetric:
-in a capture-raw corpus a false positive costs bytes that FTS will simply never
-match, while a false negative is content permanently absent from the brain. So
-when a signal is ambiguous, it admits.
+If `truncated` is true the run hit `max_threads_per_run`: capture what came
+back and **do not commit the watermark** (B2) — the next run resumes from the
+same point instead of skipping what was cut.
 
-These rules are plumbing, the same species as gmail's category filter — a
-message qualifies on what is *attached to* it, never on what it is *about*. If
-a channel needs different thresholds, that belongs in `connectors.yml` or the
-vault's `AGENTS.md` house rules — never in ad-hoc per-run judgment. And the
-residual gap is deliberate: a short, unadorned, genuinely important message
-("the vendor confirmed it ships Monday") has no structural signal at all and
-will be missed. Mode A is the answer to that — the sweep is a safety net, not a
-replacement for deliberate capture.
+### Refresh already-ingested threads (mutable sources go stale)
+
+`conversations.history` returns top-level messages at their **original `ts`**;
+replies live in `conversations.replies` and never reappear in history. So a
+thread whose parent predates the watermark is *not in the window* no matter how
+much activity it gains — without this pass the sweep would freeze a thread on
+first capture and the vault would hold a misleading snapshot that looks
+complete. Same "refresh by id" duty `sync-jira` carries:
+
+1. `tars list --connector slack --json` → keep entries whose origin starts
+   `slack:<CHANNEL_ID>/`.
+2. Re-fetch each with `slack_read_thread` (the CLI's
+   `slack.due_for_refresh()` is the helper: it drops anything already captured
+   at/after the watermark) and re-store it — unchanged is a no-op, grown is an
+   upsert.
+3. Bound the cost with `refresh_days`: only threads captured that recently are
+   revisited, since older ones rarely grow.
+
+**Stated limit:** a reply to a thread older than `refresh_days` reaches the
+vault only through Mode A ("refresh the slack thread about X"). Likewise a
+short, unadorned but genuinely important message ("the vendor confirmed it
+ships Monday") carries no structural signal and will be missed. The sweep is a
+safety net, not a replacement for deliberate capture.
 
 ## B4. Capture
 
