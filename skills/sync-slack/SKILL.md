@@ -220,6 +220,16 @@ origin `slack:<CHANNEL_ID>/<thread_ts>`, same people discipline, same concept
 shelving (judgment stays where it always was: after the fetch, on raw
 content). Re-sweeps refresh grown threads and no-op on unchanged ones.
 
+Two additions for swept documents only:
+
+- **`- selected_by: <signal>`** in the header block, from the CLI's answer.
+  Without it B5's report is unverifiable a week later and the thresholds go
+  back to being tuned by taste.
+- When the admitting signal was `reactions`, **keep the tally** in the message
+  rather than applying A2's "only reactions with decision weight" rule — a
+  message admitted *because* the channel endorsed it must not be stored with
+  the endorsement stripped.
+
 Process channels sequentially and threads within a channel one at a time
 (fetch → assemble → add) — never batch-zip parallel lists.
 
@@ -234,12 +244,15 @@ beats a suffixed one.
 
 After all channels: `tars finalize` once. Then report per channel: threads
 added / updated / unchanged, standalones captured **with the signal that
-admitted each** (attachment / reactions / pinned / link / length)
-and how many were skipped for having none, the new watermark or "uncommitted —
-errored", people linked/backfilled, concepts created vs reused. Naming the
-admitting signal is what makes the thresholds tunable from evidence instead of
-taste. Name every skipped or failed item class explicitly — silent truncation
-reads as coverage.
+admitted each** (attachment / reactions / pinned / link / length), refreshed
+threads that actually grew, and the CLI's own `skipped` tally verbatim — it
+already counts by reason (`no-signal`, `redundant-link-only`,
+`bot-or-subtype`, `over-run-cap`), so pass it through rather than recounting.
+Then the new watermark, or **"uncommitted"** with the reason (an error, or
+`truncated` — see B3). Finally people linked/backfilled and concepts created vs
+reused. Naming the admitting signal is what makes the thresholds tunable from
+evidence instead of taste; naming every skipped class is what keeps silent
+truncation from reading as coverage.
 
 ---
 
@@ -267,3 +280,18 @@ reads as coverage.
   Deliberate Mode A capture remains the default Slack posture.
 - Private channels the user belongs to may be allowlisted like public ones —
   the MCP reads what the user can read. The `im` prohibition is absolute.
+- **`include_group_dms` is redundant with the allowlist, on purpose.** An mpim
+  is swept only if the flag is true *and* its ID was hand-typed into
+  `channels`, so the ID alone would already be the opt-in. The flag is a
+  deliberate second lock on the one source where the other participants never
+  agreed to be captured — ceremony bought knowingly, not an oversight.
+- **First runs are the expensive ones.** A channel with no cursor backfills
+  `window_days`, and B4 assembles each thread verbatim in-context, so a wide
+  first sweep is one long agent run with real context-exhaustion risk. Prefer a
+  short `window_days` on first contact, and lean on `max_threads_per_run`: a
+  truncated run withholds its watermark, so resuming is just running again.
+- **Attachment `file_id`s live in the document body**, not in structured
+  metadata (`tars add` has no `--meta`, and adding one is out of scope here).
+  The follow-up that ingests attachment *content* will have to parse them back
+  out of the `Attachments:` line; that is a known and accepted cost, recorded
+  in the ROADMAP entry rather than pre-solved.
