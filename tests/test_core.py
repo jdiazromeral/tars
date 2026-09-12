@@ -318,6 +318,24 @@ def test_cursor_two_phase_advance(root):
     assert bad.exit_code != 0
 
 
+def test_cursor_namespaced_per_scope(root):
+    """Namespaced keys (`slack/<CHANNEL_ID>`) are independent cursors: multi-scope
+    connectors bracket each scope on its own, and a bare-named cursor never
+    collides with its namespaced siblings."""
+    _, runner = root
+
+    a, b = "slack/C0AAA111", "slack/C0BBB222"
+    assert runner.invoke(main, ["cursor", a, "--set", "2026-07-01T00:00:00Z"]).exit_code == 0
+    assert runner.invoke(main, ["cursor", b]).output.strip() == ""  # sibling untouched
+    assert runner.invoke(main, ["cursor", "slack"]).output.strip() == ""  # bare key untouched
+
+    # two-phase advance works per scope and stays isolated
+    assert runner.invoke(main, ["cursor", b, "--begin"]).exit_code == 0
+    committed = runner.invoke(main, ["cursor", b, "--commit"]).output.strip()
+    assert runner.invoke(main, ["cursor", b]).output.strip() == committed
+    assert runner.invoke(main, ["cursor", a]).output.strip() == "2026-07-01T00:00:00Z"
+
+
 def test_concepts_and_slug_collision(root):
     path, runner = root
     result = runner.invoke(

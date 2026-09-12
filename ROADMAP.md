@@ -25,6 +25,54 @@ trigger hasn't fired, building it early is scope, not progress.
   in `ingest.add` and rendered by `tars log`. Genuinely new state (frontmatter
   only keeps the latest `captured_at`), git-tracked like the rest of the
   vault's truth.
+- ~~**Slack channel sweep**~~ — shipped as Mode B of `tars:sync-slack`,
+  redesigned from the first (rejected) proposal: the write-time **LLM
+  relevance gate is gone**. Scope is a `connectors.yml` channel allowlist
+  (the human judgment, in config), selection inside it is deterministic
+  structural rules only (threads with replies; standalone messages when they
+  carry a human's mark — attachment, reactions, pin, a link to a surface no
+  other connector covers, length last as a weak fallback; bot/join noise
+  dropped by subtype) — a message qualifies on what is *attached to* it, never
+  on what it is *about*, the same species of plumbing as gmail's
+  `-category:promotions`, so the "no write-time judgment" thesis holds and
+  everything captured is raw. Signals are permissive on purpose: a false
+  positive costs bytes FTS never matches, a false negative is permanently
+  absent. Two dry runs over real channels calibrated the set — they cut a
+  proposed broadcast-mention signal (0 useful hits of 4) and turned links into
+  anti-signals when they point at a connector-covered domain, since a "review
+  this PR" stub only competes with the fully-ingested PR. They also showed
+  signal yield is a property of the channel: sweep where decisions are
+  announced, not where work is coordinated. One two-phase
+  watermark per channel via namespaced cursor keys (`slack/<CHANNEL_ID>` —
+  `sync_state` keys were already free-form). Selection itself is **code**
+  (`connectors/slack.py`: a typed `load_config` plus a pure
+  `select(messages, cfg)` behind `tars slack select`, covered by
+  `tests/test_slack_select.py`) — by this file's own "plumbing is code" rule a
+  rule with no judgment in it does not belong in skill prose, where an LLM
+  reading English is as deterministic as its mood. Group DMs opt in; 1:1 DMs
+  never swept; excluded from `sync-all` by default. Note for the armed
+  **secret-filtering** trigger below: this is the first connector that pulls
+  whole channels, so the doctor credential-grep check just got closer to
+  firing.
+
+  **Stated limitations of the sweep**, not separate roadmap items — a trigger
+  this PR fired itself would be exactly the anticipation the rule above
+  exists to prevent:
+  - *Attachment content is not captured*, only its metadata. An attachment is
+    one of the admitting signals, so a message can enter on the strength of an
+    artifact the corpus never takes — a pointer with no target, which reads
+    like coverage. Whoever closes this decides: identity (source-native file id
+    vs the content-addressed `file` connector, so the same document arriving by
+    two connectors dedupes); **uneven coverage**, since `extract.py` handles
+    pdf/html/text but not images, the commonest chat attachment, leaving
+    screenshots admitted-but-unreadable without OCR; thread↔file links, size
+    caps, video; and `--meta` on `tars add`, absent today, which is why file
+    ids sit in document prose. It also compounds secret filtering: whole
+    conversations *plus their files* is how a stray credential or PII export
+    reaches the vault.
+  - *Replies to threads older than `refresh_days` are only reachable via Mode
+    A* — `conversations.history` returns parents at their original `ts`, so the
+    refresh pass has to be bounded somewhere.
 - **Inbox transport**: `inbox/` + `tars sweep` exist; pick a no-cloud file
   transport for mobile capture (Syncthing/Möbius syncing only `inbox/`) — or
   consciously skip if desktop capture proves sufficient.

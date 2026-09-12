@@ -23,10 +23,12 @@ Default set — the connectors that *sweep* on a watermark:
 - **granola** (`sync-granola`) — recent meetings
 - **github** (`sync-github`) — PRs per `connectors.yml`
 
-**Slack is excluded by default** — `sync-slack` is deliberate, thread-level
-capture, not a sweep; pull those threads by hand when they matter. Narrow or
-widen on request ("sync all except gmail", "just jira and github"). Read
-`connectors.yml` for the code-connector scope (orgs / repos / authors).
+**Slack is excluded by default** — deliberate Mode A thread capture remains
+the default Slack posture. Its Mode B channel sweep joins the pass only when
+asked explicitly ("sync all including slack") and only over the
+`connectors.yml` slack allowlist. Narrow or widen on request ("sync all
+except gmail", "just jira and github"). Read `connectors.yml` for the
+code-connector scope (orgs / repos / authors).
 
 ## Steps
 

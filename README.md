@@ -347,13 +347,25 @@ connectors come in two styles:
     is issues assigned to you since the watermark; also pulls concrete keys
     ("ingest PROJ-123") or an epic's children ("sync everything under
     PROJ-100"), which are one-off and leave the watermark alone.
-  - `sync-slack` — **threads, never channel sweeps**, via the Slack MCP:
-    paste a permalink and say "save this thread". Origin
-    `slack:<channel>/<ts>`, so re-capturing a thread refreshes the snapshot
-    as replies arrive instead of duplicating. Slack is a firehose;
-    deliberate, thread-level capture keeps the corpus high-signal. There is
-    no CLI code behind it — the generic `tars add - --connector --origin`
-    pipe carries the whole thing.
+  - `sync-slack` — two modes via the Slack MCP, one storage path. **Mode A
+    (default)**: deliberate thread capture — paste a permalink and say "save
+    this thread". **Mode B** ("sweep slack channels"): an incremental sweep
+    of a `connectors.yml` **channel allowlist**, one two-phase watermark per
+    channel (`tars cursor slack/<CHANNEL_ID>`), plus a refresh pass so threads
+    that gain late replies don't freeze. Selection is **code**, not prose —
+    `tars slack select` runs a pure predicate over the fetched history
+    (threads with replies; standalone messages when they carry a human's mark
+    — attachment, reactions, pin, a link to a surface no other connector
+    already covers, or length as the weak fallback). A message qualifies on
+    what is attached to it, never on what it is about, so no model decides
+    what to keep; the allowlist is the human judgment, like gmail's category
+    filter. Sweep channels where decisions are *announced*, not where work is
+    *coordinated* — the latter's durable content already arrives via the
+    github and jira connectors. Group DMs opt in via
+    `include_group_dms`; **1:1 DMs are never swept**. Origin
+    `slack:<channel>/<ts>` either way, so hand-captured and swept threads
+    upsert instead of duplicating. There is no CLI code behind it — the
+    generic `tars add - --connector --origin` pipe carries the whole thing.
   - `sync-gmail` — inbox threads via the Gmail MCP ("sync gmail"). Default
     scope is `in:inbox -category:promotions -category:social` since the
     watermark; also pulls a concrete thread list or an ad-hoc search query
