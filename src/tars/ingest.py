@@ -110,6 +110,9 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     `doc.text` is joined to its end with one newline, so two concurrent appends
     can't lose each other. With no existing document it is a plain add, and
     re-appending lines the body already ends with is a no-op.
+
+    The ingestion event is logged before the raw write (see `ingestlog`) and
+    inside the write lock, so the log's order matches the commit order.
     """
     if concepts_mode not in ("merge", "replace"):
         raise ValueError(f"concepts_mode must be merge or replace, got {concepts_mode!r}")
@@ -145,6 +148,10 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
             return doc.id, "unchanged"
 
         path = store.raw_path_for(root, doc, existing["raw_dir"] if existing else raw_dir)
+        status = "updated" if existing else "added"
+        if log:  # append-only history, written first; a cache rebuild passes log=False
+            ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
+                                    connector=doc.connector, origin=doc.origin, title=doc.title)
         raw_path = store.write_raw(root, doc, path, source_bytes, source_ext)
         db.execute(
             """
@@ -175,18 +182,14 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     except BaseException:
         db.rollback()
         raise
-
-    status = "updated" if existing else "added"
-    if log:  # append-only ingestion history; a cache rebuild passes log=False
-        ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
-                                connector=doc.connector, origin=doc.origin, title=doc.title)
     return doc.id, status
 
 
 def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
-    """Delete a capture everywhere — raw file, source sidecar, index row — and
-    log the deletion. Returns the removed document's row (connector, origin,
-    title, raw_dir). Raises LookupError for an unknown id.
+    """Delete a capture everywhere — raw file, source sidecar, index row —
+    logging the deletion first (see `ingestlog`). Returns the removed
+    document's row (connector, origin, title, raw_dir). Raises LookupError for
+    an unknown id.
 
     The redaction path: wiki-links pointing at the capture are left alone for
     the caller to report (`doctor.references_to`), never rewritten here.
@@ -196,12 +199,12 @@ def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
     ).fetchone()
     if not row:
         raise LookupError(f"no document with id {doc_id}")
+    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
+                            connector=row["connector"], origin=row["origin"], title=row["title"])
     for target in store.raw_files(root / row["raw_dir"]):
         target.unlink(missing_ok=True)
     with db:
         db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
-                            connector=row["connector"], origin=row["origin"], title=row["title"])
     return row
 
 

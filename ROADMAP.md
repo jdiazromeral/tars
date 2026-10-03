@@ -140,13 +140,15 @@ not anticipation, so they don't need triggers. A second review pass on
   and the empty-content `ExtractionError` paths. `from_url`/`from_file`
   stay untested — they're thin dispatch over these two plus real network
   I/O, not worth mocking `httpx`.
-- [ ] **The ingestion log isn't crash-consistent with what it logs**
-  (observed 2026-07-10). `ingestlog.log_ingestion` runs *after* `db.commit()`,
-  outside the transaction, in both `ingest.add` and `ingest.remove`. A crash between the commit and the append drops an event from
-  `log/ingestions.jsonl` — the one record deliberately defined as genuinely-new,
-  NOT-regenerable state, so a lost line can't be reconstructed by `reindex`.
-  Fold the append into the committed transaction, or accept the window and say
-  so where the log is documented (`ingestlog.py` docstring).
+- [x] **The ingestion log isn't crash-consistent with what it logs**
+  (observed 2026-07-10). The append ran *after* `db.commit()`, so a crash in
+  between silently dropped an event from `log/ingestions.jsonl`, the one record
+  `reindex` can't rebuild. Resolved by logging *first*, in both `ingest.add`
+  (inside the write lock) and `ingest.remove`. No transaction spans the
+  filesystem and SQLite, so a gap remains; it is now the harmless one: an event
+  for a write that never landed, never a write with no event. The only readers
+  (`digest`, `end-of-day`) look events up for documents already in the vault,
+  so a stray event is ignored.
 
 ### Design debts
 
