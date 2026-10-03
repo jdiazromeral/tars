@@ -41,7 +41,8 @@ def test_finalize_regenerates_hub_for_unhubbed_concept(root):
 
 def test_finalize_reindexes_on_content_drift(root):
     # Hand-editing a raw body bypasses ingest and drifts the index; finalize
-    # must detect the drift, reindex, and end clean.
+    # must detect the drift, name the file it is about to absorb (a hand-edit
+    # must stay visible, not vanish into a count), reindex, and end clean.
     path, runner = root
     runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "a"], input="body")
     raw = path / "raw/note/a.md"
@@ -52,4 +53,5 @@ def test_finalize_reindexes_on_content_drift(root):
     result = runner.invoke(main, ["finalize"])
     assert result.exit_code == 0, result.output
     assert "drift cleared" in result.output
+    assert "  raw/note/a.md  content hash stale" in result.output
     assert "doctor:  clean" in result.output
