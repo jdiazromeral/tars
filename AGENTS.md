@@ -1,6 +1,6 @@
 # TARS — agent instructions
 
-TARS is a local-first second brain: an immutable raw archive + a rebuildable
+TARS is a local-first second brain: an append-mostly raw archive + a rebuildable
 SQLite/FTS5 index + a curated wiki (concepts, people, notes) + task records.
 
 ## Layout
@@ -20,7 +20,7 @@ the vault is relocatable and renamable by moving the directory and updating
 
 ```
 inbox/                            zero-ceremony drop zone — `tars sweep` drains it
-raw/<connector>/<title-slug>.md   machine archive — complete, immutable, CLI-only
+raw/<connector>/<title-slug>.md   machine archive — complete, append-mostly, CLI-only
 wiki/concepts/<slug>.md           what things are — the hubs everything shelves under
 wiki/people/<slug>.md             who's involved — identity map across our tools
 wiki/notes/<slug>.md              promoted insights (tars promote)
@@ -62,8 +62,9 @@ tars.db                           disposable index — tars reindex rebuilds it
   are stored complete. Distillation happens at query time, and only durable
   insights get promoted into `wiki/notes/` — with the user's approval, never
   in bulk.
-- **Raw is append-mostly, not literally immutable.** Three sanctioned,
-  auditable mutation paths exist — vocab normalization (below), concept
+- **Raw is append-mostly, not literally immutable.** Four sanctioned,
+  auditable mutation paths exist — `tars add --append` (growing a running
+  record such as the day's activity), vocab normalization (below), concept
   shelving via `tag`/`untag`, and `tars rm` (redaction) — all through the
   CLI. Anything else that changes a raw file by hand is a bug.
 - **Concepts are shelving state, never content.** They live in raw

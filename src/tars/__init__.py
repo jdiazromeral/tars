@@ -1,7 +1,7 @@
 """TARS — local-first second brain.
 
-Truth lives in `raw/` (immutable captures) and `notes/` (promoted insights),
-both plain files under git. `tars.db` is a rebuildable SQLite index over them.
+The vault's contract (layout and invariants) lives in AGENTS.md at the repo
+root; this package is the deterministic plumbing that enforces it.
 """
 
 __version__ = "0.1.0"
