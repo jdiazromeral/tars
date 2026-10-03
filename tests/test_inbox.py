@@ -4,7 +4,8 @@ from tars import inbox
 
 
 def test_meaningful_filename_becomes_the_title():
-    assert inbox.title_for(Path("snowflake_export-cadence.md"), "body") == "snowflake export cadence"
+    title = inbox.title_for(Path("snowflake_export-cadence.md"), "body")
+    assert title == "snowflake export cadence"
 
 
 def test_dateish_or_generic_filename_falls_back_to_first_line():

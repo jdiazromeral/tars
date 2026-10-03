@@ -90,7 +90,8 @@ def test_reactions_count_reactors_not_distinct_emoji():
 
 
 def test_pinned_is_a_signal():
-    assert slack.select([msg(text="hi", pinned_to=["C0AAA111"])], cfg()).selected[0].signal == "pinned"
+    result = slack.select([msg(text="hi", pinned_to=["C0AAA111"])], cfg())
+    assert result.selected[0].signal == "pinned"
 
 
 def test_length_is_the_last_resort():

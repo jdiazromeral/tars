@@ -1,6 +1,7 @@
 import pytest
 
-from tars import db as database, store
+from tars import db as database
+from tars import store
 from tars.connectors import github
 
 
