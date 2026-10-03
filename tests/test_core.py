@@ -1045,3 +1045,93 @@ def test_list_since_filters_by_captured_at(root):
     future = json.loads(runner.invoke(main, ["list", "--since", "2999-01-01", "--json"]).output)
     assert len(past) == len(everything) == 1
     assert future == []
+
+
+def _append(runner, text, *extra):
+    return runner.invoke(main, ["add", "-", "--append", "--origin", "activity:2026-10-01",
+                                "--connector", "activity", "--title", "2026-10-01 Activity",
+                                *extra], input=text)
+
+
+def test_append_extends_existing_text_and_keeps_one_concepts_line(root):
+    path, runner = root
+    first = _append(runner, "# 2026-10-01 Activity\n\n## Entries\n\n- 09:00 one",
+                    "--concept", "atlas")
+    assert first.output.startswith("added")
+    for n in ("two", "three", "four"):
+        res = _append(runner, f"- 10:00 {n}", "--concept", "atlas")
+        assert res.output.startswith("updated")
+    raw = (path / "raw/activity/2026-10-01-activity.md").read_text()
+    assert raw.count("Concepts:") == 1
+    body = store.read_raw(path / "raw/activity/2026-10-01-activity.md").text
+    assert body == ("# 2026-10-01 Activity\n\n## Entries\n\n"
+                    "- 09:00 one\n- 10:00 two\n- 10:00 three\n- 10:00 four")
+
+
+def test_append_without_existing_doc_is_a_plain_add(root):
+    path, runner = root
+    res = _append(runner, "- only entry")
+    assert res.output.startswith("added")
+    assert store.read_raw(path / "raw/activity/2026-10-01-activity.md").text == "- only entry"
+
+
+def test_retried_append_is_a_no_op_but_a_line_suffix_is_not(root):
+    path, runner = root
+    _append(runner, "# 2026-10-01 Activity\n\n## Entries\n\n- 09:00 one")
+    assert _append(runner, "- 09:00 one").output.startswith("unchanged")
+    # "one" ends the last line but is not a line of its own — it must append.
+    assert _append(runner, "one").output.startswith("updated")
+    body = store.read_raw(path / "raw/activity/2026-10-01-activity.md").text
+    assert body.endswith("- 09:00 one\none")
+
+
+def test_append_requires_origin(root):
+    _, runner = root
+    res = runner.invoke(main, ["add", "-", "--append"], input="text")
+    assert res.exit_code != 0
+    assert "--origin" in res.output
+
+
+def test_concurrent_appends_do_not_lose_entries(root):
+    import threading
+
+    from tars import db as database, ingest
+
+    path, runner = root
+    _append(runner, "- zero")
+
+    def append_entry(n: int) -> None:
+        conn = database.connect(path)
+        doc = store.RawDoc(connector="activity", origin="activity:2026-10-01",
+                           text=f"- entry {n}", title="2026-10-01 Activity")
+        ingest.add(path, conn, doc, append=True)
+        conn.close()
+
+    threads = [threading.Thread(target=append_entry, args=(n,)) for n in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+        assert not t.is_alive()
+    lines = store.read_raw(path / "raw/activity/2026-10-01-activity.md").text.splitlines()
+    assert sorted(lines) == sorted(["- zero"] + [f"- entry {n}" for n in range(4)])
+
+
+def test_hubs_sorts_activity_by_title_not_captured_at(root):
+    path, runner = root
+    for day in ("2026-10-01", "2026-10-02"):
+        runner.invoke(main, ["add", "-", "--origin", f"activity:{day}", "--connector", "activity",
+                             "--title", f"{day} Activity", "--concept", "atlas"], input="- x")
+    # Appending to the older day re-stamps its captured_at; the hub order must hold.
+    runner.invoke(main, ["add", "-", "--append", "--origin", "activity:2026-10-01",
+                         "--connector", "activity", "--title", "2026-10-01 Activity",
+                         "--concept", "atlas"], input="- late")
+    # Force the stamp apart (captured_at has 1s resolution) so the test can't pass by luck.
+    conn = db.connect(path)
+    with conn:
+        conn.execute("UPDATE documents SET captured_at = '2030-01-01T00:00:00Z' "
+                     "WHERE origin = 'activity:2026-10-01'")
+    conn.close()
+    runner.invoke(main, ["hubs"])
+    text = (path / "wiki/concepts/atlas.md").read_text()
+    assert text.index("2026-10-01 Activity") < text.index("2026-10-02 Activity")

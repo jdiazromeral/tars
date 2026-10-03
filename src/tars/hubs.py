@@ -32,9 +32,11 @@ def regenerate(root: Path, db: sqlite3.Connection) -> tuple[int, int]:
     pages created). Pages for concepts with no shelved docs get an empty
     section — pruning the page itself is the gardener's call, not ours."""
     shelved: dict[str, list[sqlite3.Row]] = {}
+    # `activity` records are mutable day slots appended to after the fact, so
+    # captured_at would reorder them; their titles start with the day instead.
     for row in db.execute(
         "SELECT title, origin, raw_dir, concepts FROM documents "
-        "ORDER BY captured_at, raw_dir"
+        "ORDER BY CASE WHEN connector = 'activity' THEN title ELSE captured_at END, raw_dir"
     ):
         for slug in json.loads(row["concepts"] or "[]"):
             shelved.setdefault(slug, []).append(row)

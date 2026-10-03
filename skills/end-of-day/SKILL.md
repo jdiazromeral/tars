@@ -58,9 +58,20 @@ that's exactly right; just know the proxy.
    Pass whichever you pick to `--since`. Honor an explicit window the user gives
    ("since lunch", "last 24h", "since yesterday") instead.
 
-3. **Retrospect — what landed today.** `tars list --since "<boundary>" --json`
-   (ids, titles, connectors — no bodies), and read each hit at the depth it
-   deserves, exactly as the `digest` skill prescribes:
+3. **Retrospect — what landed today.** Start with the day's **activity record**
+   (`"$TARS_HOME"/raw/activity/<YYYY-MM-DD>-activity.md`, written by the
+   `track` skill) — it is the deliberate account of where the time went, including the work that
+   left no trace anywhere else, and it is keyed by the date in its *filename*,
+   so it is exact where `--since` is only a proxy. If there is none for today,
+   say so plainly ("nothing tracked today") rather than inferring the day from
+   connector evidence alone.
+
+   Then the evidence around it: `tars list --since "<boundary>" --json`
+   (ids, titles, connectors — no bodies), dropping any `activity` hits —
+   the activity record is already the "Tracked today" band, so it would show
+   twice, and a late entry appended to a past day's record would pass for
+   today's work. Read each remaining hit at the depth it deserves, exactly as
+   the `digest` skill prescribes:
    - **Connector backfills (github, jira sweeps)** — the titles are the review;
      collapse to one line with a count, break out only an item that *changed
      something* (a decision in a PR thread, a ticket that flipped state).
@@ -84,6 +95,9 @@ that's exactly right; just know the proxy.
    hanging.
 
 6. **Show a scratch summary in chat** — not a file:
+   - **Tracked today** — the activity record's entries as logged (ticket,
+     duration, what was done), first, because it is the only first-hand band.
+     Omit the section when nothing was tracked.
    - **Done today** — grouped by concept (the vault's spine), each line ending
      in its `[[<file-stem>|<title>]]` source link; a backfill collapses to one
      counted line.
@@ -104,6 +118,11 @@ that's exactly right; just know the proxy.
   for a zero-clutter, re-runnable pass.
 - **Judgment stays where it lives.** Concept shelving and people wiring happen
   inside each `sync-<connector>` skill (via `sync-all` in step 1); task
-  discipline lives in the `tasks` skill. This skill only sequences and reads.
+  discipline lives in the `tasks` skill; writing activity entries is the `track`
+  skill's. This skill only sequences and reads.
+- **Tracking is the daily counterpart's other half.** This pass answers "what
+  happened today" from evidence; `track` answers "what did I *work on*" from
+  your own account. `/tars:track` on its own gives the ticket-by-ticket view for
+  a day or a week without the planning half.
 - **Idempotent and interrupt-safe.** No watermark to advance, additive-only
   writes — run it as many times a day as you like.

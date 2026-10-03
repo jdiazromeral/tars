@@ -38,7 +38,7 @@ def chunk_text(text: str, target: int = CHUNK_TARGET) -> list[str]:
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
         raw_dir: str | None = None, concepts_mode: str = "merge",
-        log: bool = True) -> tuple[str, str]:
+        log: bool = True, append: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
 
     `raw_dir` pins the raw file location when the DB has no row to remember it
@@ -56,6 +56,12 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     two concurrent `add` calls on the same doc (e.g. two `tars tag` invocations
     racing) can't both read the same stale `concepts` and have the second one's
     write silently clobber the first one's merge.
+
+    `append=True` makes `doc.text` an addition to the stored text instead of a
+    replacement: the existing raw text is read inside that same transaction and
+    `doc.text` is joined to its end with one newline, so two concurrent appends
+    can't lose each other. With no existing document it is a plain add, and
+    re-appending lines the body already ends with is a no-op.
     """
     if concepts_mode not in ("merge", "replace"):
         raise ValueError(f"concepts_mode must be merge or replace, got {concepts_mode!r}")
@@ -66,13 +72,22 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     rules = normalize.load_rules(root)
     if rules:
         doc.text = normalize.apply(doc.text, rules, doc.connector)
-    digest = store.content_hash(doc.text)
 
     db.execute("BEGIN IMMEDIATE")
     try:
         existing = db.execute(
             "SELECT content_hash, raw_dir, concepts FROM documents WHERE id = ?", (doc.id,)
         ).fetchone()
+        if existing and append:
+            previous = store.read_raw(root / existing["raw_dir"]).text
+            # A retried append (the command ran, the caller never saw the output)
+            # must not duplicate its lines; matching whole trailing lines keeps it
+            # a no-op without swallowing a fragment that merely ends a longer line.
+            if previous != doc.text and not previous.endswith(f"\n{doc.text}"):
+                doc.text = f"{previous}\n{doc.text}".strip("\n")
+            else:
+                doc.text = previous
+        digest = store.content_hash(doc.text)
         if existing and concepts_mode == "merge":
             stored = json.loads(existing["concepts"] or "[]")
             doc.concepts = list(dict.fromkeys(stored + doc.concepts))

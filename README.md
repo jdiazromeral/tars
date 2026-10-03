@@ -72,7 +72,8 @@ New shell, then verify from any directory: `tars status`.
 
 The agent skills live in `skills/` and ship as a plugin, namespaced
 `tars:<skill>` — `tars:capture`, `tars:ask`, `tars:digest`, `tars:end-of-day`,
-`tars:tasks`, `tars:promote`, `tars:gardener`, and the `tars:sync-*` connectors
+`tars:track`, `tars:tasks`, `tars:promote`, `tars:gardener`, and the
+`tars:sync-*` connectors
 (`ls skills/` is the authoritative list). Installed,
 they load in **every** session regardless of directory. Two equivalent ways:
 
@@ -201,6 +202,26 @@ that decides if/when a semantic-search layer earns its complexity.
 created note, and links related notes with `[[wiki-links]]`. `wiki/notes/` is the
 only curated surface: keep it small enough that every note earns its place.
 
+**4. Track what you worked on.** Connectors only see work that left a trace — a
+ticket that moved, a PR, a meeting. The afternoon spent reading code, the
+debugging that ended in *"not reproducible"*: invisible. Say *"I worked on
+DESEO-1234, traced the stale-purge path"* and the `track` skill appends it to
+today's activity record, resolving the ticket first — searching the corpus when
+you describe the work instead of naming it. It asks for a duration if you didn't
+give one; both prompts are declinable (per entry), because interviews,
+incidents and 1:1s are real work with no ticket — the weekly view reports that
+count instead of refusing the entry.
+
+One document per day (`raw/activity/2026-08-03-activity.md`), appended to all
+day through `tars add --append` (under the DB lock, so prior entries are never
+rewritten). The date lives in the *filename*, matching the `granola` convention,
+which is what makes *"what did I work on today"* and *"weekly track"* exact reads —
+`captured_at` says when something landed, not when the work happened. The review
+modes lay the entries out by ticket, list meetings as their own band (time, but
+not summed in — that would double-count), and name the days with nothing tracked
+rather than passing a gap off as an empty day. `end-of-day` reads the same record
+as its first band.
+
 ### Vault house rules (`AGENTS.md`)
 
 Drop an `AGENTS.md` at your vault root (`$TARS_HOME/AGENTS.md`) to steer the
@@ -310,8 +331,10 @@ every digest entry, task, and note that came out of it; open a note and
 Built in: `web` (URLs, incl. PDF links), `file` (pdf/md/txt/html), and `note`
 (stdin — the user's own words). Agent-authored notes get their own `agent`
 connector, so synthesis stays provenance-separate from verbatim capture — the
-`tars:capture` skill routes among all of these by whose words it is. Synced
-connectors come in two styles:
+`tars:capture` skill routes among all of these by whose words it is. The
+`activity` stream (`tars:track`) is a fourth local one: your account of what you
+worked on, one document per day, keyed by that day. Synced connectors come in
+two styles:
 
 - **Code connectors** (for sources reachable with a token or local file):
   register in `src/tars/connectors/` and run via `tars sync <name>` with
