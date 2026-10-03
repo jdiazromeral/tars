@@ -70,7 +70,8 @@ that's exactly right; just know the proxy.
    (ids, titles, connectors — no bodies), dropping any `activity` hits —
    the activity record is already the "Tracked today" band, so it would show
    twice, and a late entry appended to a past day's record would pass for
-   today's work. Read each remaining hit at the depth it deserves, exactly as the `digest` skill prescribes:
+   today's work. Read each remaining hit at the depth it deserves, exactly as
+   the `digest` skill prescribes:
    - **Connector backfills (github, jira sweeps)** — the titles are the review;
      collapse to one line with a count, break out only an item that *changed
      something* (a decision in a PR thread, a ticket that flipped state).

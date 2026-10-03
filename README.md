@@ -214,8 +214,8 @@ count instead of refusing the entry.
 
 One document per day (`raw/activity/2026-08-03-activity.md`), appended to all
 day through `tars add --append` (under the DB lock, so prior entries are never
-rewritten). The date lives in the *filename*, matching the `granola` convention, which
-is what makes *"what did I work on today"* and *"weekly track"* exact reads —
+rewritten). The date lives in the *filename*, matching the `granola` convention,
+which is what makes *"what did I work on today"* and *"weekly track"* exact reads —
 `captured_at` says when something landed, not when the work happened. The review
 modes lay the entries out by ticket, list meetings as their own band (time, but
 not summed in — that would double-count), and name the days with nothing tracked

@@ -180,8 +180,8 @@ Output, in chat, never a file:
 - **Unticketed** — the count and the lines. Seeing this every Friday is what
   makes the tickets get created.
 - **Gaps** — past weekdays in the window with no activity record at all, named
-  (no weekends, no days still to come). A silent
-  gap reads as "no work"; an explicit one reads as "not logged".
+  (no weekends, no days still to come). A silent gap reads as "no work"; an
+  explicit one reads as "not logged".
 
 Do not compute a total-hours figure. Durations live in prose (there is no
 `--meta` passthrough on `tars add`, so nothing is summable in SQL), coverage is
