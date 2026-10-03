@@ -63,3 +63,41 @@ def test_reindex_does_not_pollute_log(root):
     result = runner.invoke(main, ["reindex"])
     assert result.exit_code == 0, result.output
     assert (path / "log/ingestions.jsonl").read_text() == before
+
+
+class Crash(Exception):
+    pass
+
+
+def _events(path):
+    lines = (path / "log/ingestions.jsonl").read_text().splitlines()
+    return [json.loads(line)["action"] for line in lines]
+
+
+def test_log_survives_a_crash_mid_ingest(root, monkeypatch):
+    # The log is the one piece of state reindex can't rebuild, so an event is
+    # written before the vault changes: a crash may leave an event for a write
+    # that never landed, but never a landed write with no event.
+    path, runner = root
+    from tars import store
+
+    def crash(*args, **kwargs):
+        raise Crash
+    monkeypatch.setattr(store, "write_raw", crash)
+    result = runner.invoke(main, ["add", "-", "--title", "Doomed"], input="doomed")
+    assert isinstance(result.exception, Crash)
+    assert _events(path) == ["added"]
+
+
+def test_log_survives_a_crash_mid_remove(root, monkeypatch):
+    path, runner = root
+    added = runner.invoke(main, ["add", "-", "--title", "Kept"], input="kept")
+    doc_id = added.output.split()[1]
+    from tars import store
+
+    def crash(*args, **kwargs):
+        raise Crash
+    monkeypatch.setattr(store, "raw_files", crash)
+    result = runner.invoke(main, ["rm", doc_id, "--yes"])
+    assert isinstance(result.exception, Crash)
+    assert _events(path) == ["added", "deleted"]

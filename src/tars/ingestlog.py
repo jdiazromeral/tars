@@ -4,6 +4,12 @@ One JSON line per add / update / delete event. It is genuinely new state — raw
 frontmatter records only a doc's *latest* `captured_at`, not the sequence of
 events — so it is NOT regenerable, and it is tracked in git like the rest of
 the vault's truth.
+
+Events are written *before* the change they record (at-least-once). There is no
+transaction spanning the filesystem and SQLite, so a crash leaves one of two
+gaps, and the log takes the harmless one: an event for a write that never
+landed, never a landed write with no event. Read an event as "this was
+attempted"; the vault itself says whether the document exists.
 """
 
 from __future__ import annotations
