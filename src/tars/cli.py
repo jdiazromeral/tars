@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import click
 
-from . import db as database
+from . import backup as backup_mod, db as database
 from . import doctor as doctor_mod
-from . import extract, hubs as hubs_mod, ingest, ingestlog, normalize as normalize_mod
+from . import extract, hubs as hubs_mod, inbox, ingest, ingestlog, normalize as normalize_mod
 from . import search as search_mod, store, syncstate, view
 from .connectors import CONNECTORS
 from .connectors import slack as slack_mod
@@ -476,16 +477,6 @@ def rm(doc_id: str, yes: bool):
         click.echo(f"  still referenced in {ref}")
 
 
-def _inbox_title(path: Path, text: str) -> str:
-    """Filename wins when it's meaningful; date-ish or generic names fall back
-    to the note's first line."""
-    stem = path.stem.strip()
-    if re.fullmatch(r"[\d\-_. ]*", stem) or stem.lower() in {"note", "new note", "untitled"}:
-        first = text.lstrip().splitlines()[0].lstrip("# ").strip()
-        return first[:60] or stem or "inbox note"
-    return stem.replace("-", " ").replace("_", " ")
-
-
 @main.command()
 def sweep():
     """Ingest every text file dropped in inbox/ as a note, then remove it.
@@ -496,31 +487,14 @@ def sweep():
     duplicates; shelving stays the agent's job afterwards (`tars tag` + hubs).
     """
     root, db = _open()
-    inbox = root / store.INBOX_DIR
-    inbox.mkdir(exist_ok=True)
-    swept = skipped = 0
-    for f in sorted(p for p in inbox.iterdir() if p.is_file()):
-        if f.name.startswith("."):
-            continue
-        if f.suffix.lower() not in {".md", ".txt", ""}:
-            click.echo(f"skipped  {f.name}  (not plain text — capture it with `tars add`)")
-            skipped += 1
-            continue
-        text = f.read_text(errors="replace").strip()
-        if not text:
-            f.unlink()  # an empty drop carries nothing — just clear it
-            continue
-        doc = RawDoc(
-            connector="note",
-            origin=ingest.note_origin(text),
-            text=text,
-            title=_inbox_title(f, text),
-            meta={"source": "inbox", "inbox_file": f.name},
-        )
-        doc_id, status = ingest.add(root, db, doc)
-        f.unlink()
-        swept += 1
-        click.echo(f"{status}  {doc_id}  {f.name} → {doc.title}")
+    drops = inbox.sweep(root, db)
+    for d in drops:
+        if d.status == "skipped":
+            click.echo(f"skipped  {d.file}  (not plain text — capture it with `tars add`)")
+        elif d.status != "empty":
+            click.echo(f"{d.status}  {d.doc_id}  {d.file} → {d.title}")
+    swept = sum(d.status not in ("skipped", "empty") for d in drops)
+    skipped = sum(d.status == "skipped" for d in drops)
     click.echo(f"swept {swept} file(s)" + (f", {skipped} skipped" if skipped else ""))
 
 
@@ -535,35 +509,22 @@ def backup(dest: Path | None, keep: int | None):
     hatch — copy them to an encrypted disk or private storage. Restore with
     `git clone <bundle> <vault-dir>`.
     """
-    import os
-    import subprocess
-    from datetime import datetime
-
     root, _ = _open()
     if dest is None:
         env = os.environ.get("TARS_BACKUP_DIR")
         if not env:
             raise click.ClickException("pass DEST or set TARS_BACKUP_DIR")
         dest = Path(env)
-    if not (root / ".git").exists():
-        raise click.ClickException(
-            f"vault at {root} is not a git repo — `git init` and commit it first"
-        )
-    if subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
-                      capture_output=True, text=True).stdout.strip():
+    dest = dest.expanduser()
+    if backup_mod.has_uncommitted_changes(root):
         click.echo("warning: vault has uncommitted changes — they will NOT be in the bundle",
                    err=True)
-    dest = dest.expanduser()
-    dest.mkdir(parents=True, exist_ok=True)
-    bundle = dest / f"tars-vault-{datetime.now().strftime('%Y%m%d-%H%M%S')}.bundle"
-    result = subprocess.run(["git", "-C", str(root), "bundle", "create",
-                             str(bundle), "--all"], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise click.ClickException(f"git bundle failed: {result.stderr.strip()}")
-    if keep:
-        for old in sorted(dest.glob("tars-vault-*.bundle"))[:-keep]:
-            old.unlink()
-            click.echo(f"pruned {old.name}", err=True)
+    try:
+        bundle = backup_mod.create_bundle(root, dest)
+    except backup_mod.BackupError as exc:
+        raise click.ClickException(str(exc))
+    for old in backup_mod.prune(dest, keep) if keep else []:
+        click.echo(f"pruned {old.name}", err=True)
     click.echo(bundle)
 
 
