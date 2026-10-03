@@ -47,7 +47,9 @@ tars.db                           disposable index — tars reindex rebuilds it
   must preserve this (see `src/tars/connectors/__init__.py`). The `origin` is
   always a **stable, source-native id** (`jira:<KEY>`, `granola:<id>`, a URL,
   `note:<content-hash>`, `agent:<slug>`, `file:<content-hash>`) — never a timestamp or a local
-  path, so re-capture never mints a duplicate (the path lives in `meta`). Identity lives in `origin`; change-detection in
+  path, so re-capture never mints a duplicate (the path lives in `meta`). The one
+  deliberate exception is `activity:<YYYY-MM-DD>`: there the day *is* the
+  record's identity (one mutable document per day). Identity lives in `origin`; change-detection in
   `content_hash`; the sync cursor is only a fetch optimization.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
   after ingest (comments, status, state). The incremental watermark only
@@ -81,13 +83,18 @@ tars.db                           disposable index — tars reindex rebuilds it
   than shadowing the `design-patterns` concept hub. `tars doctor` flags any
   clash that slips in by hand (`ambiguous-stem`).
 - **Dated streams put the date in the title, so it survives in the filename.**
-  `granola` (`<YYYY-MM-DD> <title>`) and `activity` (`<YYYY-MM-DD> Activity`,
-  written by the `track` skill) name the day the work *happened*. This is not
-  cosmetic: `tars list --since` filters on `captured_at` — when a document
-  landed — which drifts from the event date whenever a sync runs late or a
-  mutable slot is re-written. Any date-scoped read (the daily and weekly
-  activity views, `end-of-day`) globs those filename prefixes; `--since` stays
-  the right tool only for undated streams, where it's a proxy and known to be one.
+  `activity` (`<YYYY-MM-DD> Activity`, written by the `track` skill) and
+  `granola` (`<YYYY-MM-DD> <title>`) carry a date prefix, but the two are not
+  equally exact. The activity date is the **local day the work happened** and is
+  authoritative; granola's is the meeting's *start* date, which can be
+  UTC-shifted near midnight. This is not cosmetic: `tars list --since` filters
+  on `captured_at` — when a document landed — which drifts from the event date
+  whenever a sync runs late or a mutable slot is re-written (every append
+  re-stamps it). So `end-of-day` and the `track` day/week views read the
+  activity record by filename; meetings still come through `--since` in
+  `end-of-day` (a proxy for undated streams), while `track` globs granola
+  filenames as a close proxy. `tars hubs` orders `activity` sources by title for
+  the same reason.
 - **Concepts (`wiki/concepts/`) are the vault's grouping**: hub pages (short
   description + `## Notes` + `## Sources`) that everything shelves under.
   Every capture gets 1–4 concepts (`--concept` on add, or `tars tag` after);
@@ -193,7 +200,9 @@ properties — keep them straight:
   `tars:capture`) and available from any directory once installed — they
   resolve the vault through `TARS_HOME`, same as the CLI.
 - Conventional Commits.
-- CLI usage: `tars add <url|file|->`, `tars sweep`, `tars tag|untag <doc_id>
+- CLI usage: `tars add <url|file|-> [--append]` (`--append` adds the text to
+  the end of the existing document for `--origin`, read and write under one DB
+  lock; a plain add if none exists), `tars sweep`, `tars tag|untag <doc_id>
   --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
   `tars show <doc_id> [--path | --head N | --grep <regex> [-C N]]` (token-frugal

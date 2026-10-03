@@ -26,8 +26,8 @@ pass (`end-of-day`) or the weekly digest; it supplies the band they were missing
 It is also not `tasks/`. A task is a commitment with an owned lifecycle
 (`open → done`, one file forever, status changes belong to the user). Activity
 is an **event**: immutable, append-many, no status. It lives in `raw/`, under
-its own `activity` connector — no CLI code behind it, the generic
-`tars add - --connector --origin` pipe carries the whole thing.
+its own `activity` connector — no connector code behind it, the generic
+`tars add - --connector --origin --append` pipe carries the whole thing.
 
 ## The record
 
@@ -45,8 +45,9 @@ One document per day, appended to all day long:
 `captured_at` — when a document *landed* — and every append rewrites the day
 record, so its `captured_at` ends up being whenever you last touched it. The
 filename is the only stable statement of which day the work happened. This
-mirrors the `granola` convention (`<YYYY-MM-DD> <title>`), which is what makes a
-day or a week readable as a filename glob across both streams:
+mirrors the `granola` convention (`<YYYY-MM-DD> <title>`, dated by the meeting's
+start time), which is what makes a day or a week readable as a filename glob
+across both streams:
 
 ```sh
 ls raw/activity/2026-08-03-*.md raw/granola/2026-08-03-*.md    # a day
@@ -83,22 +84,27 @@ words**, lightly shaped — this is their record, not your summary of it.
    Never derive it from a UTC timestamp: `captured_at` is UTC, so an evening
    entry would land in tomorrow's record. Honor an explicit day when the user
    gives one ("yesterday", "on Monday"). One case to confirm rather than guess:
-   an entry logged after local midnight when *yesterday's* record exists and
-   today's does not — that is usually still yesterday's work.
+   the entry is logged in the small hours (before 04:00 local), yesterday's
+   record exists and today's does not — that is usually still yesterday's work,
+   so ask "is this still yesterday's work?". At any other hour, today is today.
 
-2. **Resolve the ticket.** The point of the ledger is that it points at managed
-   work, so every entry tries to land on a real issue:
+2. **Resolve the ticket.** The point of the ledger is that entries land on a
+   real issue when there is one:
 
-   - **A key was given** (`DESEO-1234`) — check it is ingested
-     (`tars list --connector jira --json`). If it is not, pull it through the
+   - **A key was given** (`DESEO-1234`) — find the ingested issue by its origin
+     `jira:<KEY>`: `tars list --connector jira --json`, filtered to that origin
+     (the CLI has no exact-origin query). If it is not there, pull it through the
      `sync-jira` skill's **concrete-issue** mode (which correctly leaves the
-     watermark alone), then link its raw stem. **Nothing will catch this
-     later**: `tars doctor` deliberately excludes `raw/` from its dangling-link
-     check (captured third-party text can contain literal `[[...]]` that isn't a
-     wiki-link), so an entry pointing at a document that was never ingested is a
-     silently dead link. Verify here, or don't write a link — if the ticket
-     can't be ingested (no access, MCP down), record the bare key as plain text
-     and say so in the report.
+     watermark alone) and look it up the same way. Then get the link stem from
+     `tars show <id> --path` (the file's basename, without `.md`) — **never guess
+     the stem from the title**: collision suffixes and renamed tickets make the
+     title a bad predictor. **Nothing will catch a wrong stem later**: `tars
+     doctor` deliberately excludes `raw/` from its dangling-link check (captured
+     third-party text can contain literal `[[...]]` that isn't a wiki-link), so
+     an entry pointing at a document that was never ingested is a silently dead
+     link. Verify here, or don't write a link — if the ticket can't be ingested
+     (no access, MCP down), record the bare key as plain text and say so in the
+     report.
    - **Prose, no key** ("the cache invalidation thing") — `tars search` the
      corpus and offer the matching ticket. Usually it exists and the user simply
      didn't say the number.
@@ -107,43 +113,41 @@ words**, lightly shaped — this is their record, not your summary of it.
 3. **Ask for what's missing — once, and skippably.** When either slot is empty,
    ask in a **single** prompt, not two:
 
-   - *No ticket resolved* → offer to create the Jira issue, proposing project,
-     type and summary from the user's own words. Creating it is an outward write
-     to a real system of record: use `createJiraIssue` via the Atlassian Rovo MCP
-     (load the tool with ToolSearch if deferred), **only** on explicit
-     confirmation, never silently. Once created, ingest it via `sync-jira`
-     concrete mode so the link resolves.
+   - *No ticket resolved* → ask for the key, or accept `unticketed`.
    - *No duration given* → ask how long.
 
-   Both are **declinable**, and a decline sticks for the rest of the session —
-   "no ticket" records the entry as `unticketed`, "skip time" records `—`. This
-   prompt exists to catch the entries worth catching, not to interrogate every
-   line: real work is legitimately unticketed sometimes (interviews, an
-   incident, a 1:1, admin), and the weekly review reports that count instead of
-   the skill refusing the entry.
+   Both are **declinable**, and a decline applies to **that one entry only** —
+   not the rest of the session. "No ticket" records the entry as `unticketed`,
+   "skip time" records `—`. This prompt exists to catch the entries worth
+   catching, not to interrogate every line: real work is legitimately unticketed
+   sometimes (interviews, an incident, a 1:1, admin), and the weekly review
+   reports that count instead of the skill refusing the entry.
 
-4. **Append to the day's record.** Find it — `ls raw/activity/<date>-*.md`,
-   falling back to `tars list --connector activity --json` — and if it exists,
-   read the file, **drop the frontmatter block and a leading `Concepts:` line**
-   (that line is a derived rendering; re-feeding it would duplicate it), append
-   the new entry under `## Entries`, and pipe the whole body back:
+4. **Append to the day's record** with `tars add - --append`. Same origin every
+   time, so the day is one document; the append happens under the DB lock, so
+   there is no model rewrite of prior entries and no lost writes across
+   concurrent sessions.
+
+   - **First entry of the day** (no `raw/activity/<date>-*.md` yet): the body is
+     the header — `# <YYYY-MM-DD> Activity`, a blank line, `## Entries`, a blank
+     line — plus the entry.
+   - **Later entries**: the body is just the single entry line; `--append` lands
+     it as the next line under `## Entries`.
 
    ```sh
-   tars add - --connector activity --origin "activity:<YYYY-MM-DD>" \
+   tars add - --append --connector activity --origin "activity:<YYYY-MM-DD>" \
      --title "<YYYY-MM-DD> Activity" --tag activity --concept activity-log \
      < /path/to/scratch.md
    ```
 
    Write the body to a scratch file and redirect it — heredocs mangle special
-   characters. Same origin every time, so the day is one document that upserts;
-   re-adding an unchanged body is a no-op.
+   characters.
 
-   Run `tars hubs` only when `tars add` reports **`added`** (a new day record
-   means a new row on the `activity-log` hub, and the hub skeleton on the very
-   first ever entry). On `updated` there is nothing for it to change.
+   Always run `tars hubs` afterwards (a new day record is a new row on the
+   `activity-log` hub, and the hub skeleton on the very first ever entry).
 
 5. **Report** one line: the day, the entry as stored, whether the ticket was
-   resolved / created / left unticketed, and the add status.
+   resolved / left unticketed, and the add status.
 
 ## Review mode
 
@@ -152,9 +156,16 @@ answers the same. Read the **filename dates**, not `captured_at`.
 
 - **Day** ("what did I work on today"): the day's activity record, plus that
   day's meetings (`raw/granola/<date>-*.md` — meetings are time spent too), plus
-  `tars list --since <date> --json` for corroborating ticket and PR movement.
-  If the day's Granola files aren't there yet, offer `sync-granola` first — the
-  date-prefixed filenames make the gap visible without a fetch.
+  `tars list --since <date> --json` for corroborating ticket and PR movement,
+  bounded to that day: drop results whose `captured_at` is on or after the next
+  day (for a past day the open-ended `--since` would otherwise pull in
+  everything since). A bare date compares against UTC `captured_at`, so the edges
+  are fuzzy by the local UTC offset; use `end-of-day`'s local-midnight cutoff
+  when that matters. If the day's Granola files aren't there yet, offer
+  `sync-granola` first — the date-prefixed filenames make the gap visible without
+  a fetch. Granola's filename date comes from the meeting's start time and may be
+  UTC-shifted near midnight, so the glob is a close proxy for meetings, exact for
+  activity.
 - **Week** ("weekly track"): the same read over the calendar week —
   `date -v-mon +%Y-%m-%d` gives this week's Monday on macOS (today, if today is
   Monday) — or an explicit window the user names.
@@ -168,7 +179,8 @@ Output, in chat, never a file:
   are not entries; adding the two together double-counts.
 - **Unticketed** — the count and the lines. Seeing this every Friday is what
   makes the tickets get created.
-- **Gaps** — days in the window with no activity record at all, named. A silent
+- **Gaps** — past weekdays in the window with no activity record at all, named
+  (no weekends, no days still to come). A silent
   gap reads as "no work"; an explicit one reads as "not logged".
 
 Do not compute a total-hours figure. Durations live in prose (there is no

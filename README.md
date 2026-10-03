@@ -207,15 +207,14 @@ ticket that moved, a PR, a meeting. The afternoon spent reading code, the
 debugging that ended in *"not reproducible"*: invisible. Say *"I worked on
 DESEO-1234, traced the stale-purge path"* and the `track` skill appends it to
 today's activity record, resolving the ticket first — searching the corpus when
-you describe the work instead of naming it, and offering to **create** the Jira
-issue (on confirmation, never silently) when there genuinely isn't one, so the
-ledger only points at managed work. It asks for a duration if you didn't give
-one; both prompts are declinable and the decline sticks, because interviews,
+you describe the work instead of naming it. It asks for a duration if you didn't
+give one; both prompts are declinable (per entry), because interviews,
 incidents and 1:1s are real work with no ticket — the weekly view reports that
 count instead of refusing the entry.
 
 One document per day (`raw/activity/2026-08-03-activity.md`), appended to all
-day. The date lives in the *filename*, matching the `granola` convention, which
+day through `tars add --append` (under the DB lock, so prior entries are never
+rewritten). The date lives in the *filename*, matching the `granola` convention, which
 is what makes *"what did I work on today"* and *"weekly track"* exact reads —
 `captured_at` says when something landed, not when the work happened. The review
 modes lay the entries out by ticket, list meetings as their own band (time, but
