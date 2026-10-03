@@ -37,7 +37,7 @@ One document per day, appended to all day long:
 |---|---|
 | connector | `activity` |
 | origin | `activity:<YYYY-MM-DD>` |
-| title | `<YYYY-MM-DD> Activity` → `raw/activity/<YYYY-MM-DD>-activity.md` |
+| title | `<YYYY-MM-DD> Activity` → `"$TARS_HOME"/raw/activity/<YYYY-MM-DD>-activity.md` |
 | concept | `activity-log` (exactly one — see below) |
 | tag | `activity` |
 
@@ -50,8 +50,12 @@ start time), which is what makes a day or a week readable as a filename glob
 across both streams:
 
 ```sh
-ls raw/activity/2026-08-03-*.md raw/granola/2026-08-03-*.md    # a day
+ls "$TARS_HOME"/raw/activity/2026-08-03-*.md "$TARS_HOME"/raw/granola/2026-08-03-*.md    # a day
 ```
+
+Every vault path goes through `$TARS_HOME`: the session runs from whatever
+directory it was opened in, and a bare `raw/...` glob there finds nothing — so
+the skill would decide today has no record and write a second header into it.
 
 **One concept, on purpose.** Shelve under `activity-log` only — never under the
 project concepts the entries mention. `tars hubs` regenerates each hub's
@@ -128,7 +132,7 @@ words**, lightly shaped — this is their record, not your summary of it.
    there is no model rewrite of prior entries and no lost writes across
    concurrent sessions.
 
-   - **First entry of the day** (no `raw/activity/<date>-*.md` yet): the body is
+   - **First entry of the day** (no `"$TARS_HOME"/raw/activity/<date>-*.md` yet): the body is
      the header — `# <YYYY-MM-DD> Activity`, a blank line, `## Entries`, a blank
      line — plus the entry.
    - **Later entries**: the body is just the single entry line; `--append` lands
@@ -155,7 +159,8 @@ Read-only, date-scoped, no watermark — re-run it as often as you like and it
 answers the same. Read the **filename dates**, not `captured_at`.
 
 - **Day** ("what did I work on today"): the day's activity record, plus that
-  day's meetings (`raw/granola/<date>-*.md` — meetings are time spent too), plus
+  day's meetings (`"$TARS_HOME"/raw/granola/<date>-*.md` — meetings are time spent
+  too), plus
   `tars list --since <date> --json` for corroborating ticket and PR movement,
   bounded to that day: drop results whose `captured_at` is on or after the next
   day (for a past day the open-ended `--since` would otherwise pull in
@@ -167,8 +172,9 @@ answers the same. Read the **filename dates**, not `captured_at`.
   UTC-shifted near midnight, so the glob is a close proxy for meetings, exact for
   activity.
 - **Week** ("weekly track"): the same read over the calendar week —
-  `date -v-mon +%Y-%m-%d` gives this week's Monday on macOS (today, if today is
-  Monday) — or an explicit window the user names.
+  this week's Monday is `date -v-mon +%Y-%m-%d` on macOS/BSD and
+  `date -d "-$(( $(date +%u) - 1 )) days" +%F` on GNU/Linux (both give today on
+  a Monday) — or an explicit window the user names.
 
 Output, in chat, never a file:
 

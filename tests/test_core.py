@@ -1057,6 +1057,16 @@ def test_append_without_existing_doc_is_a_plain_add(root):
     assert store.read_raw(path / "raw/activity/2026-10-01-activity.md").text == "- only entry"
 
 
+def test_retried_append_is_a_no_op_but_a_line_suffix_is_not(root):
+    path, runner = root
+    _append(runner, "# 2026-10-01 Activity\n\n## Entries\n\n- 09:00 one")
+    assert _append(runner, "- 09:00 one").output.startswith("unchanged")
+    # "one" ends the last line but is not a line of its own — it must append.
+    assert _append(runner, "one").output.startswith("updated")
+    body = store.read_raw(path / "raw/activity/2026-10-01-activity.md").text
+    assert body.endswith("- 09:00 one\none")
+
+
 def test_append_requires_origin(root):
     _, runner = root
     res = runner.invoke(main, ["add", "-", "--append"], input="text")

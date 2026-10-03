@@ -59,8 +59,8 @@ that's exactly right; just know the proxy.
    ("since lunch", "last 24h", "since yesterday") instead.
 
 3. **Retrospect — what landed today.** Start with the day's **activity record**
-   (`raw/activity/<YYYY-MM-DD>-activity.md`, written by the `track` skill) — it
-   is the deliberate account of where the time went, including the work that
+   (`"$TARS_HOME"/raw/activity/<YYYY-MM-DD>-activity.md`, written by the
+   `track` skill) — it is the deliberate account of where the time went, including the work that
    left no trace anywhere else, and it is keyed by the date in its *filename*,
    so it is exact where `--since` is only a proxy. If there is none for today,
    say so plainly ("nothing tracked today") rather than inferring the day from
