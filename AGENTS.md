@@ -195,6 +195,8 @@ properties — keep them straight:
 
 - Python ≥3.11, managed with `uv`. Run things as `uv run tars ...`,
   tests as `uv run pytest`.
+- CI (`.github/workflows/ci.yml`) runs `uv run ruff check`, `uv run pyright`
+  and `uv run pytest -q`; run the same three before pushing.
 - The agent skills live in `skills/` and ship as a Claude Code **plugin**
   (`.claude-plugin/`), namespaced `tars:<skill>` (e.g. `tars:ask`,
   `tars:capture`) and available from any directory once installed — they
