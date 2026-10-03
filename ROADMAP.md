@@ -141,13 +141,12 @@ not anticipation, so they don't need triggers. A second review pass on
   stay untested — they're thin dispatch over these two plus real network
   I/O, not worth mocking `httpx`.
 - [ ] **The ingestion log isn't crash-consistent with what it logs**
-  (observed 2026-07-10). `index.log_ingestion` runs *after* `db.commit()`,
-  outside the ingest transaction (`ingest.py:117`; same for `deleted` in
-  `cli.py:475`). A crash between the commit and the append drops an event from
+  (observed 2026-07-10). `ingestlog.log_ingestion` runs *after* `db.commit()`,
+  outside the transaction, in both `ingest.add` and `ingest.remove`. A crash between the commit and the append drops an event from
   `log/ingestions.jsonl` — the one record deliberately defined as genuinely-new,
   NOT-regenerable state, so a lost line can't be reconstructed by `reindex`.
   Fold the append into the committed transaction, or accept the window and say
-  so where the log is documented (`index.py` docstring).
+  so where the log is documented (`ingestlog.py` docstring).
 
 ### Design debts
 
@@ -162,12 +161,17 @@ not anticipation, so they don't need triggers. A second review pass on
   just becomes a dangling link once `tars rm` removes the target) rather
   than needing separate logic. Read-only — reports the fix command
   (`tars reindex` / `tars hubs`), never mutates. `tests/test_doctor.py`.
-- [ ] **Stop `cli.py` becoming the junk drawer.** `sweep` title heuristics,
-  `rm`'s reference scan, `backup`'s git workflow all live inline in command
-  handlers — against the project's own "plumbing is code in modules" rule.
-  Now 615 lines (2026-07-10), up from 548 at the last review: the trend is the
-  argument. Commands should be ~10-line adapters; moving the logic out also
-  makes it unit-testable without CliRunner.
+- [x] **Stop `cli.py` becoming the junk drawer.** Done 2026-10-03. The
+  criterion was not line count ("~10-line adapters" would have minted
+  one-function modules): logic left the CLI when it encoded an invariant, was
+  duplicated, or deserved a unit test of its own. That moved capture identity
+  (`ingest.resolve_target`/`note_origin`, previously only in `add` and
+  re-derived in `sweep`), watermarks (`syncstate.py`, whose upsert SQL `sync`
+  and `cursor` duplicated), redaction (`ingest.remove` +
+  `doctor.references_to`, which also fixed `rm` reporting `[[foo-bar]]` as a
+  link to `foo`), `inbox.py` and `backup.py`. What stays is argument handling,
+  output, and read-only queries (`list`, `status`): 716 → 596 lines, none of
+  them a rule the vault depends on.
 - [ ] **De-duplicate the invariants (currently in triplicate).** The origin
   contract lives in README, AGENTS.md, *and* the `connectors/__init__.py`
   docstring; vocab scoping in AGENTS.md *and* `normalize.py`. Pick one home
