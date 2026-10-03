@@ -14,11 +14,12 @@ Three layers, in order of trust:
 | Layer | What | Where | In git |
 |---|---|---|---|
 | Inbox | Zero-ceremony landing zone — any tool that writes a text file captures; `tars sweep` drains it into raw/ | `inbox/` | yes (transient) |
-| Raw archive | Complete, immutable captures with provenance frontmatter, filenames from human titles | `raw/<connector>/<title-slug>.md` | yes |
+| Raw archive | Complete, append-mostly captures with provenance frontmatter, filenames from human titles; changed only through the CLI | `raw/<connector>/<title-slug>.md` | yes |
 | Wiki | The curated human layer: concept hubs (what things are), people pages (identity map across tools), promoted notes | `wiki/concepts/`, `wiki/people/`, `wiki/notes/` | yes |
 | Tasks | One record per commitment (status/owner/due + provenance links) plus a regenerable open-items index | `tasks/`, `tasks/TASKS.md` | yes |
 | Index | SQLite catalog + FTS5 full-text index (an `embedding` column is reserved so vectors can slot in later) | `tars.db` | no — rebuild with `tars reindex` |
 | Derived views | Regenerable rollups organized by concept | `digests/` | yes |
+| Ingestion log | Append-only history of every add / update / delete (`tars log`) — the one record `reindex` can't rebuild | `log/ingestions.jsonl` | yes |
 
 There is deliberately **no mandatory summarization pipeline**. Raw captures
 stay complete, so a fact that seems irrelevant today can still be found the
@@ -28,6 +29,10 @@ insights (decisions, rationale, concepts) get promoted into `wiki/notes/`.
 Plumbing (fetch, normalize, dedup, chunk, index, sync) is deterministic code
 in the `tars` CLI. The model's judgment is reserved for the seams that need
 it: extracting from messy sources, and answering questions with citations.
+
+This section is the overview. The full contract (vault layout and every
+invariant the CLI and skills uphold) lives in [AGENTS.md](AGENTS.md) — when
+the two disagree, AGENTS.md wins and this section is the one to fix.
 
 ## Install (system-wide)
 
