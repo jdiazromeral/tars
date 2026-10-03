@@ -41,6 +41,7 @@ import re
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import click
 import yaml
@@ -155,7 +156,7 @@ def _fetch_discussion(repo: str, number: int, ignore: set[str]) -> list[dict]:
 @register("github")
 def sync(root: Path, db, cursor: str | None) -> str:
     cfg = load_config(root)
-    authors = cfg.get("authors") or [_gh_json("user")["login"]]
+    authors = cfg.get("authors") or [cast(dict, _gh_json("user"))["login"]]
     since = cursor or (
         datetime.now(timezone.utc) - timedelta(days=int(cfg.get("window_days", 30)))
     ).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -195,7 +196,7 @@ def sync(root: Path, db, cursor: str | None) -> str:
             if origin in seen:
                 continue
             seen[origin] = repo
-            pr = _gh_json(f"repos/{repo}/pulls/{number}")
+            pr = cast(dict, _gh_json(f"repos/{repo}/pulls/{number}"))
             ignore = set(cfg.get("ignore_authors") or [])
             doc = RawDoc(
                 connector="github",

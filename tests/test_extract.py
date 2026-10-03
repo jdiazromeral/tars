@@ -111,7 +111,10 @@ def test_from_html_no_url_omits_url_from_meta():
 def test_from_html_falls_back_to_title_tag_when_metadata_extraction_fails(monkeypatch):
     import trafilatura
 
-    monkeypatch.setattr(trafilatura, "extract_metadata", lambda *a, **k: (_ for _ in ()).throw(RuntimeError))
+    def boom(*a, **k):
+        raise RuntimeError
+
+    monkeypatch.setattr(trafilatura, "extract_metadata", boom)
     extracted = _from_html(HTML_ARTICLE)
     assert extracted.title == "My Page Title"
 

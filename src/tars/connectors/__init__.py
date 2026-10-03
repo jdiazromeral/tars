@@ -31,7 +31,8 @@ and `file` (`file:<hash>` over the raw bytes) are content-addressed so
 re-capturing the same text/document dedupes across paths and machines — the path
 lives in `meta` as provenance, not identity. Agent-authored notes take the
 `agent` connector, keyed by a mutable `agent:<slug>` slot (or `agent:<hash>` when
-frozen), keeping synthesis provenance-separate from what the user said or read. Correctness comes from `origin` (identity) plus
+frozen), keeping synthesis provenance-separate from what the user said or read.
+Correctness comes from `origin` (identity) plus
 `documents.content_hash` (change detection); the cursor below is only a fetch
 optimization and is never load-bearing for dedup.
 

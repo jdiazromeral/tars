@@ -76,7 +76,8 @@ def test_tars_home_without_marker_is_refused(tmp_path, monkeypatch):
 
 def test_add_note_and_search(root):
     path, runner = root
-    text = "We removed the generic invitations user because loyalty points caused performance issues."
+    text = ("We removed the generic invitations user because loyalty points "
+            "caused performance issues.")
     result = runner.invoke(main, ["add", "-", "--title", "invitations user removal",
                                   "--origin", "note:test-1"], input=text)
     assert result.exit_code == 0, result.output
@@ -115,7 +116,8 @@ def test_concurrent_tag_merge_does_not_lose_updates(root):
     # reads the first one's result.
     import threading
 
-    from tars import db as database, ingest
+    from tars import db as database
+    from tars import ingest
 
     path, runner = root
     runner.invoke(main, ["add", "-", "--origin", "note:race", "--title", "race"],
@@ -204,7 +206,8 @@ def test_add_local_file(root, tmp_path_factory):
 
 def test_reindex_rebuilds_from_raw(root):
     path, runner = root
-    runner.invoke(main, ["add", "-", "--origin", "note:keep"], input="kubernetes migration rationale")
+    runner.invoke(main, ["add", "-", "--origin", "note:keep"],
+                  input="kubernetes migration rationale")
     (path / "tars.db").unlink()
 
     result = runner.invoke(main, ["reindex"])
@@ -281,7 +284,8 @@ def test_connector_override_and_cursor(root):
     assert list(path.glob("raw/granola/*.md"))
 
     assert runner.invoke(main, ["cursor", "granola"]).output == ""
-    assert runner.invoke(main, ["cursor", "granola", "--set", "2026-07-01T10:00:00Z"]).exit_code == 0
+    result = runner.invoke(main, ["cursor", "granola", "--set", "2026-07-01T10:00:00Z"])
+    assert result.exit_code == 0
     assert runner.invoke(main, ["cursor", "granola"]).output.strip() == "2026-07-01T10:00:00Z"
 
     status = runner.invoke(main, ["status"])
@@ -428,7 +432,8 @@ def test_normalize_command_and_idempotency(root):
 
 def test_show_and_status(root):
     _, runner = root
-    add = runner.invoke(main, ["add", "-", "--origin", "note:s", "--title", "t"], input="hello world")
+    add = runner.invoke(main, ["add", "-", "--origin", "note:s", "--title", "t"],
+                        input="hello world")
     doc_id = add.output.split()[1]
 
     show = runner.invoke(main, ["show", doc_id])
@@ -952,7 +957,8 @@ def test_ingest_canonicalizes_trailing_newlines(root):
     # A connector passing text with a trailing newline (github's assembler did)
     # must hash identically to what read_raw returns, or every doc is
     # permanently "drifted" and re-syncs churn as updated forever.
-    from tars import db as database, ingest
+    from tars import db as database
+    from tars import ingest
     from tars.store import RawDoc
 
     path, runner = root
@@ -1095,7 +1101,8 @@ def test_append_requires_origin(root):
 def test_concurrent_appends_do_not_lose_entries(root):
     import threading
 
-    from tars import db as database, ingest
+    from tars import db as database
+    from tars import ingest
 
     path, runner = root
     _append(runner, "- zero")

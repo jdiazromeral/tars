@@ -10,10 +10,13 @@ from pathlib import Path
 
 import click
 
-from . import backup as backup_mod, db as database
+from . import backup as backup_mod
+from . import db as database
 from . import doctor as doctor_mod
-from . import extract, hubs as hubs_mod, inbox, ingest, ingestlog, normalize as normalize_mod
-from . import search as search_mod, store, syncstate, view
+from . import extract, inbox, ingest, ingestlog, store, syncstate, view
+from . import hubs as hubs_mod
+from . import normalize as normalize_mod
+from . import search as search_mod
 from .connectors import CONNECTORS
 from .connectors import slack as slack_mod
 from .store import RawDoc
@@ -290,7 +293,8 @@ def sync(connector: str | None):
 @click.option("--begin", is_flag=True,
               help="Stamp now() into a pending watermark; call before an incremental sweep.")
 @click.option("--commit", is_flag=True,
-              help="Promote the pending watermark to live; call only after a sweep ingests cleanly.")
+              help="Promote the pending watermark to live; "
+                   "call only after a sweep ingests cleanly.")
 def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     """Read or advance the sync watermark for a connector (used by skill-fed syncs).
 
@@ -570,7 +574,8 @@ def slack():
 
 
 @slack.command("select")
-@click.option("--channel", required=True, help="Channel ID being swept (checked against the allowlist).")
+@click.option("--channel", required=True,
+              help="Channel ID being swept (checked against the allowlist).")
 @click.option("--channel-type", default="public_channel", show_default=True,
               help="public_channel | private_channel | mpim | im.")
 def slack_select(channel: str, channel_type: str):

@@ -178,7 +178,7 @@ not anticipation, so they don't need triggers. A second review pass on
   per invariant (contract prose in code docstrings; AGENTS.md links, doesn't
   restate) before the copies drift. The `.claude-plugin/*.json` skill lists are
   a fresh instance of the same class — see Nits — and have *already* drifted.
-- [ ] **CI + lint + type check.** Type hints everywhere, nothing enforces
+- [x] **CI + lint + type check.** Type hints everywhere, nothing enforces
   them; a good test suite nothing runs automatically. ruff + pyright +
   a GitHub Actions workflow running `uv run pytest` — an hour of work for a
   repo pitched as shareable.
