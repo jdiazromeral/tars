@@ -183,6 +183,28 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     return doc.id, status
 
 
+def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
+    """Delete a capture everywhere — raw file, source sidecar, index row — and
+    log the deletion. Returns the removed document's row (connector, origin,
+    title, raw_dir). Raises LookupError for an unknown id.
+
+    The redaction path: wiki-links pointing at the capture are left alone for
+    the caller to report (`doctor.references_to`), never rewritten here.
+    """
+    row = db.execute(
+        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if not row:
+        raise LookupError(f"no document with id {doc_id}")
+    for target in store.raw_files(root / row["raw_dir"]):
+        target.unlink(missing_ok=True)
+    with db:
+        db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
+                            connector=row["connector"], origin=row["origin"], title=row["title"])
+    return row
+
+
 def reindex(root: Path, db: sqlite3.Connection) -> int:
     """Rebuild the whole index from raw/. The DB is a cache; raw/ is truth.
 

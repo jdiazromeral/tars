@@ -463,28 +463,17 @@ def rm(doc_id: str, yes: bool):
     `tars hubs` afterwards to drop it from concept pages.
     """
     root, db = _open()
-    row = db.execute(
-        "SELECT connector, raw_dir, title, origin FROM documents WHERE id = ?", (doc_id,)
-    ).fetchone()
+    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
     if not row:
         raise click.ClickException(f"no document with id {doc_id}")
     raw_path = root / row["raw_dir"]
-    stem = raw_path.stem
-    targets = sorted(raw_path.parent.glob(f"{stem}.*"))
     if not yes:
-        names = ", ".join(t.name for t in targets) or row["raw_dir"]
+        names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
         click.confirm(f"delete {names} and its index entry?", abort=True)
-    for target in targets:
-        target.unlink(missing_ok=True)
-    with db:
-        db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
-                            connector=row["connector"], origin=row["origin"], title=row["title"])
-    click.echo(f"deleted  {doc_id}  [{row['origin']}] {row['title'] or ''}")
-    for layer in (store.WIKI_DIR, store.TASKS_DIR, store.DIGESTS_DIR, store.RAW_DIR):
-        for md in sorted((root / layer).rglob("*.md")):
-            if f"[[{stem}" in md.read_text():
-                click.echo(f"  still referenced in {md.relative_to(root)}")
+    removed = ingest.remove(root, db, doc_id)
+    click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
+    for ref in doctor_mod.references_to(root, raw_path.stem):
+        click.echo(f"  still referenced in {ref}")
 
 
 def _inbox_title(path: Path, text: str) -> str:

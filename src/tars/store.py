@@ -246,6 +246,12 @@ def write_raw(root: Path, doc: RawDoc, path: Path,
     return path
 
 
+def raw_files(content_md: Path) -> list[Path]:
+    """A capture's files on disk: the content .md plus any source sidecar
+    `write_raw` put next to it under the same stem."""
+    return sorted(content_md.parent.glob(f"{content_md.stem}.*"))
+
+
 def read_raw(content_md: Path) -> RawDoc:
     raw = content_md.read_text()
     if not raw.startswith("---\n"):

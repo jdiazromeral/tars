@@ -57,6 +57,14 @@ def dangling_links(root: Path) -> list[Finding]:
     return findings
 
 
+def references_to(root: Path, stem: str) -> list[Path]:
+    """Vault files (relative to root) whose text still mentions `[[stem`."""
+    return [md.relative_to(root)
+            for layer in (store.WIKI_DIR, store.TASKS_DIR, store.DIGESTS_DIR, store.RAW_DIR)
+            for md in sorted((root / layer).rglob("*.md"))
+            if f"[[{stem}" in md.read_text()]
+
+
 def ambiguous_stems(root: Path) -> list[Finding]:
     """Two files sharing a basename across layers. `dangling_links` can't see
     this — it folds stems into a set, so a collision looks like one valid
