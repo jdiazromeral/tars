@@ -428,7 +428,8 @@ def finalize():
     so `tars add`/`sync` and hand-edits don't leave the vault half-wired:
 
     \b
-      1. reindex  — only when the DB has drifted from raw/ (keeps it cheap)
+      1. reindex  — only when the DB has drifted from raw/, naming each
+                    drifted file first (a hand-edit stays visible)
       2. hubs     — rebuild every concept hub's `## Sources` from shelving
       3. doctor   — re-check invariants
 
@@ -438,7 +439,12 @@ def finalize():
     """
     root, db = _open()
 
-    if any(f.check == "db-drift" for f in doctor_mod.run(root, db)):
+    drift = doctor_mod.db_drift(root, db)
+    if drift:
+        # Name every drifted file before reindex absorbs it: a stale content
+        # hash is usually a hand-edit to raw/, and a bare count would hide it.
+        for f in drift:
+            click.echo(f"  {f.path}  {f.detail.removesuffix(' — run `tars reindex`')}")
         count = ingest.reindex(root, db)
         click.echo(f"reindex: {count} document(s) (drift cleared)")
     else:

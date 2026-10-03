@@ -217,6 +217,14 @@ not anticipation, so they don't need triggers. A second review pass on
 - **Scheduled headless digest**: trigger = the backup launchd job proving the
   unattended pattern for a couple of weeks, and the manual digest rhythm
   feeling like a chore.
+- **Enforcing "never hand-edit `raw/`"** (a plugin PreToolUse hook denying
+  Edit/Write under `$TARS_HOME/raw/`): trigger = a hand-edit actually
+  happening — `finalize` naming a drifted file no crash explains, or a raw
+  diff in the vault's git that the CLI didn't make. Until then, detection is
+  enough: `doctor` flags the stale hash and `finalize` names the file before
+  reindexing it. Skill `allowed-tools` is *not* a substitute: it pre-approves
+  tools, it doesn't restrict them; `disallowed-tools` drops whole tools for
+  one turn only and can't close Bash.
 
 ## Non-goals
 
