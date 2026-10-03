@@ -58,11 +58,16 @@ def dangling_links(root: Path) -> list[Finding]:
 
 
 def references_to(root: Path, stem: str) -> list[Path]:
-    """Vault files (relative to root) whose text still mentions `[[stem`."""
+    """Vault files (relative to root) holding a [[wiki-link]] to `stem`.
+
+    Unlike dangling_links this scans raw/ too: agent and note captures cite
+    other captures, and an exact-stem match can't be fooled by stray brackets
+    in third-party text the way a "does this target exist" check can.
+    """
     return [md.relative_to(root)
             for layer in (store.WIKI_DIR, store.TASKS_DIR, store.DIGESTS_DIR, store.RAW_DIR)
             for md in sorted((root / layer).rglob("*.md"))
-            if f"[[{stem}" in md.read_text()]
+            if any(m.group(1).strip() == stem for m in _LINK_RE.finditer(md.read_text()))]
 
 
 def ambiguous_stems(root: Path) -> list[Finding]:
