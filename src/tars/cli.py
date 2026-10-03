@@ -52,9 +52,14 @@ def init(path: Path):
 @click.option("--concept", "concepts", multiple=True,
               help="Concept slug(s) this capture belongs to; repeatable. "
                    "Prepends a 'Concepts:' wiki-link line so the vault graph clusters.")
+@click.option("--append", "append", is_flag=True,
+              help="Append the text to the end of the existing document with this "
+                   "--origin (read + write under one DB lock); a plain add if none exists.")
 def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | None,
-        connector_override: str | None, concepts: tuple[str, ...]):
+        connector_override: str | None, concepts: tuple[str, ...], append: bool):
     """Capture TARGET: a URL, a file path, or '-' for pasted text on stdin."""
+    if append and not origin:
+        raise click.ClickException("--append requires --origin (the document to append to)")
     root, db = _open()
     source_bytes = source_ext = None
 
@@ -94,7 +99,7 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
         concepts=[store.slugify(c) for c in concepts],
         meta=extracted.meta,
     )
-    doc_id, status = ingest.add(root, db, doc, source_bytes, source_ext)
+    doc_id, status = ingest.add(root, db, doc, source_bytes, source_ext, append=append)
     click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc_origin}")
 
 
