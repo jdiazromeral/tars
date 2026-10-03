@@ -28,6 +28,16 @@ def _open(start: Path | None = None):
     return root, database.connect(root)
 
 
+def _doc_row(db, doc_id: str):
+    """The index row (connector, origin, title, raw_dir) for DOC_ID, or a clean CLI error."""
+    row = db.execute(
+        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if not row:
+        raise click.ClickException(f"no document with id {doc_id}")
+    return row
+
+
 @click.group()
 @click.version_option()
 def main():
@@ -145,9 +155,7 @@ def show(doc_id: str, path_only: bool, head: int | None, pattern: str | None, co
     if sum((path_only, head is not None, pattern is not None)) > 1:
         raise click.ClickException("choose at most one of --path / --head / --grep")
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     raw_path = root / row["raw_dir"]
     if path_only:
         click.echo(raw_path)
@@ -200,9 +208,7 @@ def list_(connector: str | None, since: str | None, as_json: bool):
 def tag(doc_id: str, concepts: tuple[str, ...]):
     """Attach concept wiki-links to an already-captured document (idempotent merge)."""
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     doc = store.read_raw(root / row["raw_dir"])
     doc.concepts = [store.slugify(c) for c in concepts]
     _, status = ingest.add(root, db, doc)  # default merge unions with stored concepts
@@ -217,9 +223,7 @@ def tag(doc_id: str, concepts: tuple[str, ...]):
 def untag(doc_id: str, concepts: tuple[str, ...]):
     """Remove concept wiki-links from a document (idempotent; the inverse of tag)."""
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     doc = store.read_raw(root / row["raw_dir"])
     remove = {store.slugify(c) for c in concepts}
     doc.concepts = [slug for slug in doc.concepts if slug not in remove]
@@ -233,11 +237,7 @@ def untag(doc_id: str, concepts: tuple[str, ...]):
 def promote(doc_id: str, title: str):
     """Create a note skeleton in notes/ linked to DOC_ID; fill in the insight after."""
     root, db = _open()
-    row = db.execute(
-        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
-    ).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     source_stem = Path(row["raw_dir"]).stem
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
     if note_path.exists():
@@ -464,9 +464,7 @@ def rm(doc_id: str, yes: bool):
     `tars hubs` afterwards to drop it from concept pages.
     """
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     raw_path = root / row["raw_dir"]
     if not yes:
         names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
