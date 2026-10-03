@@ -12,7 +12,7 @@ import click
 from . import db as database
 from . import doctor as doctor_mod
 from . import extract, hubs as hubs_mod, ingest, ingestlog, normalize as normalize_mod
-from . import search as search_mod, store, view
+from . import search as search_mod, store, syncstate, view
 from .connectors import CONNECTORS
 from .connectors import slack as slack_mod
 from .store import RawDoc
@@ -276,20 +276,11 @@ def sync(connector: str | None):
     if connector not in CONNECTORS:
         raise click.ClickException(f"unknown connector: {connector}")
     root, db = _open()
-    cursor_row = db.execute(
-        "SELECT cursor FROM sync_state WHERE connector = ?", (connector,)
-    ).fetchone()
     try:
-        new_cursor = CONNECTORS[connector](root, db, cursor_row["cursor"] if cursor_row else None)
+        new_cursor = CONNECTORS[connector](root, db, syncstate.get_cursor(db, connector))
     except RuntimeError as exc:  # scope/config/transport errors: no cursor persisted
         raise click.ClickException(str(exc))
-    with db:
-        db.execute(
-            "INSERT INTO sync_state (connector, cursor, last_sync) VALUES (?, ?, ?) "
-            "ON CONFLICT(connector) DO UPDATE SET cursor = excluded.cursor, "
-            "last_sync = excluded.last_sync",
-            (connector, new_cursor, store.now_iso()),
-        )
+    syncstate.set_cursor(db, connector, new_cursor)
 
 
 @main.command()
@@ -315,50 +306,17 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     if sum((value is not None, begin, commit)) > 1:
         raise click.ClickException("choose exactly one of --set / --begin / --commit")
     _, db = _open()
-
     if begin:
-        stamp = store.now_iso()
-        with db:
-            db.execute(
-                "INSERT INTO sync_state (connector, pending_cursor) VALUES (?, ?) "
-                "ON CONFLICT(connector) DO UPDATE SET pending_cursor = excluded.pending_cursor",
-                (connector, stamp),
-            )
-        click.echo(stamp)
-        return
-
-    if commit:
-        row = db.execute(
-            "SELECT pending_cursor FROM sync_state WHERE connector = ?", (connector,)
-        ).fetchone()
-        if not row or not row["pending_cursor"]:
-            raise click.ClickException(
-                f"no pending watermark for {connector} — run `cursor {connector} --begin` first"
-            )
-        pending = row["pending_cursor"]
-        with db:
-            db.execute(
-                "UPDATE sync_state SET cursor = ?, pending_cursor = NULL, last_sync = ? "
-                "WHERE connector = ?",
-                (pending, store.now_iso(), connector),
-            )
-        click.echo(pending)
-        return
-
-    if value is None:
-        row = db.execute(
-            "SELECT cursor FROM sync_state WHERE connector = ?", (connector,)
-        ).fetchone()
-        if row and row["cursor"]:
-            click.echo(row["cursor"])
-        return
-    with db:
-        db.execute(
-            "INSERT INTO sync_state (connector, cursor, last_sync) VALUES (?, ?, ?) "
-            "ON CONFLICT(connector) DO UPDATE SET cursor = excluded.cursor, "
-            "last_sync = excluded.last_sync",
-            (connector, value, store.now_iso()),
-        )
+        click.echo(syncstate.begin(db, connector))
+    elif commit:
+        try:
+            click.echo(syncstate.commit(db, connector))
+        except LookupError as exc:
+            raise click.ClickException(f"{exc} — run `cursor {connector} --begin` first")
+    elif value is not None:
+        syncstate.set_cursor(db, connector, value)
+    elif current := syncstate.get_cursor(db, connector):
+        click.echo(current)
 
 
 @main.command()
