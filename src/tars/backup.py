@@ -5,6 +5,7 @@ storage). Restore with `git clone <bundle> <vault-dir>`.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -12,12 +13,27 @@ from pathlib import Path
 BUNDLE_GLOB = "tars-vault-*.bundle"
 
 
+# Repo-locating variables (a subset of `git rev-parse --local-env-vars`).
+# `git rebase --exec` and git hooks export them; inherited, they make every git
+# call here act on the *enclosing* repo instead of the one at `root`.
+GIT_REPO_ENV_VARS = (
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_PREFIX",
+)
+
+
 class BackupError(Exception):
     pass
 
 
+def git_env() -> dict[str, str]:
+    """The current environment minus the variables that pick a git repo."""
+    return {k: v for k, v in os.environ.items() if k not in GIT_REPO_ENV_VARS}
+
+
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True,
+                          env=git_env())
 
 
 def has_uncommitted_changes(root: Path) -> bool:
