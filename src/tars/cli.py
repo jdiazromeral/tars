@@ -62,46 +62,20 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
     if append and not origin:
         raise click.ClickException("--append requires --origin (the document to append to)")
     root, db = _open()
-    source_bytes = source_ext = None
-
-    if target == "-":
-        text = sys.stdin.read().strip()
-        if not text:
-            raise click.ClickException("stdin was empty")
-        connector = "note"
-        # Content-addressed by default so re-pasting the same text dedupes
-        # (idempotence, like every synced connector's stable id). Pass an explicit
-        # --origin to treat a note as a mutable slot you update in place instead.
-        doc_origin = origin or f"note:{store.content_hash(text)[:12]}"
-        extracted = extract.Extracted(text=text, title=title)
-    elif target.startswith(("http://", "https://")):
-        connector = "web"
-        # Canonicalized so tracking params / fragments can't mint duplicates.
-        doc_origin = origin or store.canonical_url(target)
-        extracted = _try(lambda: extract.from_url(target))
-    else:
-        path = Path(target).expanduser()
-        if not path.exists():
-            raise click.ClickException(f"no such file: {target}")
-        connector = "file"
-        # Content-addressed by the file's raw bytes, so the same document dedupes
-        # across paths/machines; the path is kept in meta as provenance, not identity.
-        # Pass an explicit --origin to track a path as a mutable slot instead.
-        doc_origin = origin or f"file:{store.content_hash(path.read_bytes())[:12]}"
-        extracted = _try(lambda: extract.from_file(path))
-        source_bytes, source_ext = extracted.source_bytes, extracted.source_ext
-
+    resolved = _try(lambda: ingest.resolve_target(target, stdin=sys.stdin, origin=origin))
+    extracted = resolved.extracted
     doc = RawDoc(
-        connector=connector_override or connector,
-        origin=doc_origin,
+        connector=connector_override or resolved.connector,
+        origin=resolved.origin,
         text=extracted.text,
         title=title or extracted.title,
         tags=list(tags),
         concepts=[store.slugify(c) for c in concepts],
         meta=extracted.meta,
     )
-    doc_id, status = ingest.add(root, db, doc, source_bytes, source_ext, append=append)
-    click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc_origin}")
+    doc_id, status = ingest.add(root, db, doc, extracted.source_bytes, extracted.source_ext,
+                                append=append)
+    click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc.origin}")
 
 
 def _try(fn):
@@ -591,7 +565,7 @@ def sweep():
             continue
         doc = RawDoc(
             connector="note",
-            origin=f"note:{store.content_hash(text)[:12]}",
+            origin=ingest.note_origin(text),
             text=text,
             title=_inbox_title(f, text),
             meta={"source": "inbox", "inbox_file": f.name},
