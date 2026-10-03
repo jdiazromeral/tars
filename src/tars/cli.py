@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 import click
 
-from . import db as database
+from . import backup as backup_mod, db as database
 from . import doctor as doctor_mod
-from . import extract, hubs as hubs_mod, ingest, ingestlog, normalize as normalize_mod
-from . import search as search_mod, store, view
+from . import extract, hubs as hubs_mod, inbox, ingest, ingestlog, normalize as normalize_mod
+from . import search as search_mod, store, syncstate, view
 from .connectors import CONNECTORS
 from .connectors import slack as slack_mod
 from .store import RawDoc
@@ -25,6 +26,16 @@ def _open(start: Path | None = None):
     except (store.NotARootError, store.VaultVersionError) as exc:
         raise click.ClickException(str(exc))
     return root, database.connect(root)
+
+
+def _doc_row(db, doc_id: str):
+    """The index row (connector, origin, title, raw_dir) for DOC_ID, or a clean CLI error."""
+    row = db.execute(
+        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if not row:
+        raise click.ClickException(f"no document with id {doc_id}")
+    return row
 
 
 @click.group()
@@ -62,46 +73,20 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
     if append and not origin:
         raise click.ClickException("--append requires --origin (the document to append to)")
     root, db = _open()
-    source_bytes = source_ext = None
-
-    if target == "-":
-        text = sys.stdin.read().strip()
-        if not text:
-            raise click.ClickException("stdin was empty")
-        connector = "note"
-        # Content-addressed by default so re-pasting the same text dedupes
-        # (idempotence, like every synced connector's stable id). Pass an explicit
-        # --origin to treat a note as a mutable slot you update in place instead.
-        doc_origin = origin or f"note:{store.content_hash(text)[:12]}"
-        extracted = extract.Extracted(text=text, title=title)
-    elif target.startswith(("http://", "https://")):
-        connector = "web"
-        # Canonicalized so tracking params / fragments can't mint duplicates.
-        doc_origin = origin or store.canonical_url(target)
-        extracted = _try(lambda: extract.from_url(target))
-    else:
-        path = Path(target).expanduser()
-        if not path.exists():
-            raise click.ClickException(f"no such file: {target}")
-        connector = "file"
-        # Content-addressed by the file's raw bytes, so the same document dedupes
-        # across paths/machines; the path is kept in meta as provenance, not identity.
-        # Pass an explicit --origin to track a path as a mutable slot instead.
-        doc_origin = origin or f"file:{store.content_hash(path.read_bytes())[:12]}"
-        extracted = _try(lambda: extract.from_file(path))
-        source_bytes, source_ext = extracted.source_bytes, extracted.source_ext
-
+    resolved = _try(lambda: ingest.resolve_target(target, stdin=sys.stdin, origin=origin))
+    extracted = resolved.extracted
     doc = RawDoc(
-        connector=connector_override or connector,
-        origin=doc_origin,
+        connector=connector_override or resolved.connector,
+        origin=resolved.origin,
         text=extracted.text,
         title=title or extracted.title,
         tags=list(tags),
         concepts=[store.slugify(c) for c in concepts],
         meta=extracted.meta,
     )
-    doc_id, status = ingest.add(root, db, doc, source_bytes, source_ext, append=append)
-    click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc_origin}")
+    doc_id, status = ingest.add(root, db, doc, extracted.source_bytes, extracted.source_ext,
+                                append=append)
+    click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc.origin}")
 
 
 def _try(fn):
@@ -170,9 +155,7 @@ def show(doc_id: str, path_only: bool, head: int | None, pattern: str | None, co
     if sum((path_only, head is not None, pattern is not None)) > 1:
         raise click.ClickException("choose at most one of --path / --head / --grep")
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     raw_path = root / row["raw_dir"]
     if path_only:
         click.echo(raw_path)
@@ -225,9 +208,7 @@ def list_(connector: str | None, since: str | None, as_json: bool):
 def tag(doc_id: str, concepts: tuple[str, ...]):
     """Attach concept wiki-links to an already-captured document (idempotent merge)."""
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     doc = store.read_raw(root / row["raw_dir"])
     doc.concepts = [store.slugify(c) for c in concepts]
     _, status = ingest.add(root, db, doc)  # default merge unions with stored concepts
@@ -242,9 +223,7 @@ def tag(doc_id: str, concepts: tuple[str, ...]):
 def untag(doc_id: str, concepts: tuple[str, ...]):
     """Remove concept wiki-links from a document (idempotent; the inverse of tag)."""
     root, db = _open()
-    row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     doc = store.read_raw(root / row["raw_dir"])
     remove = {store.slugify(c) for c in concepts}
     doc.concepts = [slug for slug in doc.concepts if slug not in remove]
@@ -258,11 +237,7 @@ def untag(doc_id: str, concepts: tuple[str, ...]):
 def promote(doc_id: str, title: str):
     """Create a note skeleton in notes/ linked to DOC_ID; fill in the insight after."""
     root, db = _open()
-    row = db.execute(
-        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
-    ).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     source_stem = Path(row["raw_dir"]).stem
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
     if note_path.exists():
@@ -302,20 +277,11 @@ def sync(connector: str | None):
     if connector not in CONNECTORS:
         raise click.ClickException(f"unknown connector: {connector}")
     root, db = _open()
-    cursor_row = db.execute(
-        "SELECT cursor FROM sync_state WHERE connector = ?", (connector,)
-    ).fetchone()
     try:
-        new_cursor = CONNECTORS[connector](root, db, cursor_row["cursor"] if cursor_row else None)
+        new_cursor = CONNECTORS[connector](root, db, syncstate.get_cursor(db, connector))
     except RuntimeError as exc:  # scope/config/transport errors: no cursor persisted
         raise click.ClickException(str(exc))
-    with db:
-        db.execute(
-            "INSERT INTO sync_state (connector, cursor, last_sync) VALUES (?, ?, ?) "
-            "ON CONFLICT(connector) DO UPDATE SET cursor = excluded.cursor, "
-            "last_sync = excluded.last_sync",
-            (connector, new_cursor, store.now_iso()),
-        )
+    syncstate.set_cursor(db, connector, new_cursor)
 
 
 @main.command()
@@ -341,50 +307,17 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     if sum((value is not None, begin, commit)) > 1:
         raise click.ClickException("choose exactly one of --set / --begin / --commit")
     _, db = _open()
-
     if begin:
-        stamp = store.now_iso()
-        with db:
-            db.execute(
-                "INSERT INTO sync_state (connector, pending_cursor) VALUES (?, ?) "
-                "ON CONFLICT(connector) DO UPDATE SET pending_cursor = excluded.pending_cursor",
-                (connector, stamp),
-            )
-        click.echo(stamp)
-        return
-
-    if commit:
-        row = db.execute(
-            "SELECT pending_cursor FROM sync_state WHERE connector = ?", (connector,)
-        ).fetchone()
-        if not row or not row["pending_cursor"]:
-            raise click.ClickException(
-                f"no pending watermark for {connector} — run `cursor {connector} --begin` first"
-            )
-        pending = row["pending_cursor"]
-        with db:
-            db.execute(
-                "UPDATE sync_state SET cursor = ?, pending_cursor = NULL, last_sync = ? "
-                "WHERE connector = ?",
-                (pending, store.now_iso(), connector),
-            )
-        click.echo(pending)
-        return
-
-    if value is None:
-        row = db.execute(
-            "SELECT cursor FROM sync_state WHERE connector = ?", (connector,)
-        ).fetchone()
-        if row and row["cursor"]:
-            click.echo(row["cursor"])
-        return
-    with db:
-        db.execute(
-            "INSERT INTO sync_state (connector, cursor, last_sync) VALUES (?, ?, ?) "
-            "ON CONFLICT(connector) DO UPDATE SET cursor = excluded.cursor, "
-            "last_sync = excluded.last_sync",
-            (connector, value, store.now_iso()),
-        )
+        click.echo(syncstate.begin(db, connector))
+    elif commit:
+        try:
+            click.echo(syncstate.commit(db, connector))
+        except LookupError as exc:
+            raise click.ClickException(f"{exc} — run `cursor {connector} --begin` first")
+    elif value is not None:
+        syncstate.set_cursor(db, connector, value)
+    elif current := syncstate.get_cursor(db, connector):
+        click.echo(current)
 
 
 @main.command()
@@ -531,38 +464,15 @@ def rm(doc_id: str, yes: bool):
     `tars hubs` afterwards to drop it from concept pages.
     """
     root, db = _open()
-    row = db.execute(
-        "SELECT connector, raw_dir, title, origin FROM documents WHERE id = ?", (doc_id,)
-    ).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
+    row = _doc_row(db, doc_id)
     raw_path = root / row["raw_dir"]
-    stem = raw_path.stem
-    targets = sorted(raw_path.parent.glob(f"{stem}.*"))
     if not yes:
-        names = ", ".join(t.name for t in targets) or row["raw_dir"]
+        names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
         click.confirm(f"delete {names} and its index entry?", abort=True)
-    for target in targets:
-        target.unlink(missing_ok=True)
-    with db:
-        db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
-                            connector=row["connector"], origin=row["origin"], title=row["title"])
-    click.echo(f"deleted  {doc_id}  [{row['origin']}] {row['title'] or ''}")
-    for layer in (store.WIKI_DIR, store.TASKS_DIR, store.DIGESTS_DIR, store.RAW_DIR):
-        for md in sorted((root / layer).rglob("*.md")):
-            if f"[[{stem}" in md.read_text():
-                click.echo(f"  still referenced in {md.relative_to(root)}")
-
-
-def _inbox_title(path: Path, text: str) -> str:
-    """Filename wins when it's meaningful; date-ish or generic names fall back
-    to the note's first line."""
-    stem = path.stem.strip()
-    if re.fullmatch(r"[\d\-_. ]*", stem) or stem.lower() in {"note", "new note", "untitled"}:
-        first = text.lstrip().splitlines()[0].lstrip("# ").strip()
-        return first[:60] or stem or "inbox note"
-    return stem.replace("-", " ").replace("_", " ")
+    removed = ingest.remove(root, db, doc_id)
+    click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
+    for ref in doctor_mod.references_to(root, raw_path.stem):
+        click.echo(f"  still referenced in {ref}")
 
 
 @main.command()
@@ -575,31 +485,14 @@ def sweep():
     duplicates; shelving stays the agent's job afterwards (`tars tag` + hubs).
     """
     root, db = _open()
-    inbox = root / store.INBOX_DIR
-    inbox.mkdir(exist_ok=True)
-    swept = skipped = 0
-    for f in sorted(p for p in inbox.iterdir() if p.is_file()):
-        if f.name.startswith("."):
-            continue
-        if f.suffix.lower() not in {".md", ".txt", ""}:
-            click.echo(f"skipped  {f.name}  (not plain text — capture it with `tars add`)")
-            skipped += 1
-            continue
-        text = f.read_text(errors="replace").strip()
-        if not text:
-            f.unlink()  # an empty drop carries nothing — just clear it
-            continue
-        doc = RawDoc(
-            connector="note",
-            origin=f"note:{store.content_hash(text)[:12]}",
-            text=text,
-            title=_inbox_title(f, text),
-            meta={"source": "inbox", "inbox_file": f.name},
-        )
-        doc_id, status = ingest.add(root, db, doc)
-        f.unlink()
-        swept += 1
-        click.echo(f"{status}  {doc_id}  {f.name} → {doc.title}")
+    drops = inbox.sweep(root, db)
+    for d in drops:
+        if d.status == "skipped":
+            click.echo(f"skipped  {d.file}  (not plain text — capture it with `tars add`)")
+        elif d.status != "empty":
+            click.echo(f"{d.status}  {d.doc_id}  {d.file} → {d.title}")
+    swept = sum(d.status not in ("skipped", "empty") for d in drops)
+    skipped = sum(d.status == "skipped" for d in drops)
     click.echo(f"swept {swept} file(s)" + (f", {skipped} skipped" if skipped else ""))
 
 
@@ -614,35 +507,22 @@ def backup(dest: Path | None, keep: int | None):
     hatch — copy them to an encrypted disk or private storage. Restore with
     `git clone <bundle> <vault-dir>`.
     """
-    import os
-    import subprocess
-    from datetime import datetime
-
     root, _ = _open()
     if dest is None:
         env = os.environ.get("TARS_BACKUP_DIR")
         if not env:
             raise click.ClickException("pass DEST or set TARS_BACKUP_DIR")
         dest = Path(env)
-    if not (root / ".git").exists():
-        raise click.ClickException(
-            f"vault at {root} is not a git repo — `git init` and commit it first"
-        )
-    if subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
-                      capture_output=True, text=True).stdout.strip():
+    dest = dest.expanduser()
+    if backup_mod.has_uncommitted_changes(root):
         click.echo("warning: vault has uncommitted changes — they will NOT be in the bundle",
                    err=True)
-    dest = dest.expanduser()
-    dest.mkdir(parents=True, exist_ok=True)
-    bundle = dest / f"tars-vault-{datetime.now().strftime('%Y%m%d-%H%M%S')}.bundle"
-    result = subprocess.run(["git", "-C", str(root), "bundle", "create",
-                             str(bundle), "--all"], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise click.ClickException(f"git bundle failed: {result.stderr.strip()}")
-    if keep:
-        for old in sorted(dest.glob("tars-vault-*.bundle"))[:-keep]:
-            old.unlink()
-            click.echo(f"pruned {old.name}", err=True)
+    try:
+        bundle = backup_mod.create_bundle(root, dest)
+    except backup_mod.BackupError as exc:
+        raise click.ClickException(str(exc))
+    for old in backup_mod.prune(dest, keep) if keep else []:
+        click.echo(f"pruned {old.name}", err=True)
     click.echo(bundle)
 
 

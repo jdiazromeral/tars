@@ -5,12 +5,60 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
-from . import ingestlog, normalize, store
+from . import extract, ingestlog, normalize, store
 from .store import RawDoc
 
 CHUNK_TARGET = 1600  # characters; roughly 400 tokens
+
+
+@dataclass
+class Resolved:
+    """A capture target turned into its identity (connector + origin) and content."""
+    connector: str
+    origin: str
+    extracted: extract.Extracted
+
+
+def note_origin(text: str) -> str:
+    """Content-addressed origin for the user's own words: re-pasting dedupes."""
+    return f"note:{store.content_hash(text)[:12]}"
+
+
+def resolve_target(target: str, *, stdin: TextIO | None = None,
+                   origin: str | None = None) -> Resolved:
+    """Map a `tars add` target — '-' (text on `stdin`), a URL, or a file path —
+    to its connector, stable origin, and extracted content.
+
+    This is where built-in captures get their identity. Defaults are chosen so
+    re-capture never mints a duplicate: notes and files are content-addressed
+    (a file's path is provenance, kept in meta, not identity), URLs are
+    canonicalized so tracking params and fragments can't split one page in
+    two. An explicit `origin` overrides the default, turning the capture into
+    a mutable slot that later captures update in place.
+
+    Raises extract.ExtractionError for an empty note or a missing file; fetch
+    and parse errors propagate as-is.
+    """
+    if target == "-":
+        text = (stdin.read() if stdin else "").strip()
+        if not text:
+            raise extract.ExtractionError("stdin was empty")
+        return Resolved("note", origin or note_origin(text), extract.Extracted(text=text))
+    if target.startswith(("http://", "https://")):
+        extracted = extract.from_url(target)
+        # Web captures keep only the extracted text — no sidecar of the fetched
+        # bytes, even for a PDF link (a file capture of the same PDF keeps one).
+        extracted.source_bytes = extracted.source_ext = None
+        return Resolved("web", origin or store.canonical_url(target), extracted)
+    path = Path(target).expanduser()
+    if not path.exists():
+        raise extract.ExtractionError(f"no such file: {target}")
+    file_origin = origin or f"file:{store.content_hash(path.read_bytes())[:12]}"
+    return Resolved("file", file_origin, extract.from_file(path))
 
 
 def chunk_text(text: str, target: int = CHUNK_TARGET) -> list[str]:
@@ -133,6 +181,28 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
                                 connector=doc.connector, origin=doc.origin, title=doc.title)
     return doc.id, status
+
+
+def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
+    """Delete a capture everywhere — raw file, source sidecar, index row — and
+    log the deletion. Returns the removed document's row (connector, origin,
+    title, raw_dir). Raises LookupError for an unknown id.
+
+    The redaction path: wiki-links pointing at the capture are left alone for
+    the caller to report (`doctor.references_to`), never rewritten here.
+    """
+    row = db.execute(
+        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if not row:
+        raise LookupError(f"no document with id {doc_id}")
+    for target in store.raw_files(root / row["raw_dir"]):
+        target.unlink(missing_ok=True)
+    with db:
+        db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+    ingestlog.log_ingestion(root, action="deleted", doc_id=doc_id,
+                            connector=row["connector"], origin=row["origin"], title=row["title"])
+    return row
 
 
 def reindex(root: Path, db: sqlite3.Connection) -> int:

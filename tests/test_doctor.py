@@ -192,3 +192,15 @@ def test_doctor_module_run_matches_cli(root):
         "unhubbed-concept", "wiki/concepts/atlas.md",
         "concept 'atlas' has shelved docs but no hub page — run `tars hubs`",
     )]
+
+
+def test_references_to_matches_whole_links_only(tmp_path):
+    # `[[foo-bar]]` shares a prefix with `foo` but is a different target; it
+    # must not be reported as a reference, while every real link form must be.
+    for layer in ("wiki/concepts", "tasks", "raw/agent"):
+        (tmp_path / layer).mkdir(parents=True)
+    (tmp_path / "wiki/concepts/bar.md").write_text("see [[foo-bar]] and [[foobar|x]]\n")
+    (tmp_path / "tasks/t.md").write_text("Source: [[foo|Foo]]\n")
+    (tmp_path / "raw/agent/log.md").write_text("| [[foo\\|Foo]] |\n")
+    refs = doctor.references_to(tmp_path, "foo")
+    assert [str(p) for p in refs] == ["tasks/t.md", "raw/agent/log.md"]
