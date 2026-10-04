@@ -39,13 +39,14 @@ def from_url(url: str) -> Extracted:
     return _from_html(response.text, url=url)
 
 
-def _utf8(path: Path) -> str:
+def read_utf8(path: Path) -> str:
     """A text file's contents, decoded strictly: replacing undecodable bytes
-    would silently turn "café" into "caf\ufffd" in the archive."""
+    would silently turn "café" into "caf\ufffd" in the archive. A UTF-8 BOM
+    (Notepad's habit) is dropped, so it never leads a title or an origin."""
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8-sig")
     except UnicodeDecodeError:
-        raise ExtractionError(f"{path.name} is not UTF-8 text — convert it first "
+        raise ExtractionError(f"{path.name} is not UTF-8 text — convert it "
                               "(e.g. `iconv -f latin1 -t utf-8`)") from None
 
 
@@ -54,11 +55,11 @@ def from_file(path: Path) -> Extracted:
     if suffix == ".pdf":
         extracted = from_pdf_bytes(path.read_bytes())
     elif suffix in {".html", ".htm"}:
-        extracted = _from_html(_utf8(path))
+        extracted = _from_html(read_utf8(path))
         extracted.source_bytes = path.read_bytes()
         extracted.source_ext = "html"
     elif suffix in TEXT_EXTENSIONS or not suffix:
-        extracted = Extracted(text=_utf8(path))
+        extracted = Extracted(text=read_utf8(path))
     else:
         raise ExtractionError(f"unsupported file type: {path.name}")
     extracted.title = extracted.title or path.stem

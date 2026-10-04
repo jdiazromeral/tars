@@ -13,7 +13,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import ingest, store
+from . import extract, ingest, store
 from .store import RawDoc
 
 TEXT_SUFFIXES = {".md", ".txt", ""}
@@ -56,10 +56,9 @@ def sweep(root: Path, db: sqlite3.Connection) -> list[Drop]:
             drops.append(Drop(f.name, "skipped"))
             continue
         try:
-            text = f.read_text(encoding="utf-8").strip()
-        except UnicodeDecodeError:  # never decode lossily and then unlink the only copy
-            drops.append(Drop(f.name, "kept", title="not UTF-8 text — convert it "
-                              "(e.g. `iconv -f latin1 -t utf-8`) and drop it again"))
+            text = extract.read_utf8(f).strip()
+        except extract.ExtractionError as exc:  # never decode lossily, then unlink the only copy
+            drops.append(Drop(f.name, "kept", title=f"{exc} and drop it again"))
             continue
         if not text:
             f.unlink()
