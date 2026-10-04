@@ -209,6 +209,10 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     # that same form or a connector passing a trailing "\n" (github did) makes
     # every stored hash stale on re-read — permanent db-drift + upsert churn.
     doc.text = doc.text.strip("\n")
+    if doc.title is not None:
+        # One line, at capture: a newline in a title would start a heading or
+        # list item wherever it is rendered — by code or by an agent.
+        doc.title = " ".join(doc.title.split()) or None
     rules = normalize.load_rules(root)
     if rules:
         doc.text = normalize.apply(doc.text, rules, doc.connector)
@@ -524,16 +528,28 @@ def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
                             connector=row["connector"], origin=row["origin"], title=row["title"])
     for target in store.raw_files(root / row["raw_dir"]):
         target.unlink(missing_ok=True)
-    # Redaction must not leave the text readable in the database files: zero
-    # the freed pages, merge the FTS segments that still hold its tokens,
-    # rebuild the file, and empty the WAL.
+    # Zero the freed pages as they are freed: the floor of redaction if the
+    # caller's `scrub_index` can't get the exclusive access it needs.
     db.execute("PRAGMA secure_delete = ON")
     with db:
         db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-        db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('optimize')")
-    db.execute("VACUUM")
-    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return row
+
+
+def scrub_index(db: sqlite3.Connection) -> bool:
+    """Leave no deleted text readable in the database files: merge the FTS
+    segments that still hold its tokens, rebuild the file, empty the WAL.
+    Returns False — never raises — when another connection blocks a step
+    (VACUUM needs exclusive access; a busy checkpoint keeps WAL frames), so
+    the caller can say the scrub is incomplete instead of claiming it."""
+    try:
+        db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('optimize')")
+        db.commit()
+        db.execute("VACUUM")
+        busy = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except sqlite3.OperationalError:
+        return False
+    return busy == 0
 
 
 def reindex(root: Path, db: sqlite3.Connection) -> tuple[int, list[tuple[Path, str]]]:

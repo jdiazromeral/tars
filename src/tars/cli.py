@@ -347,7 +347,7 @@ def promote(ref: str, title: str):
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
     # [[stem]] links are one flat namespace: a stem another file already owns
     # would make every link to either resolve arbitrarily.
-    owner = next((f for f in store.linkable_files(root) if f.stem == note_path.stem), None)
+    owner = store.stem_owner(root, note_path.stem) or (note_path if note_path.exists() else None)
     if owner:
         raise click.ClickException(
             f"[[{note_path.stem}]] is taken by {owner.relative_to(root)} — title the note "
@@ -355,7 +355,7 @@ def promote(ref: str, title: str):
     fields = {"title": title, "promoted_at": store.now_iso(),
               "source_doc": store.quoted(doc_id), "source_origin": row["origin"],
               "source_connector": row["connector"]}
-    label = store.link_label(row["title"] or row["origin"])
+    label = store.link_label(row["title"], row["origin"])
     note_path.write_text(f"{store.frontmatter_block(fields)}\n"
                          "<!-- distilled insight goes here -->\n\n"
                          f"Source: [[{source_stem}|{label}]]\n")
@@ -444,10 +444,13 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool, clear: 
 
 @main.command()
 def reindex():
-    """Rebuild tars.db from raw/ (the DB is a disposable cache)."""
+    """Rebuild tars.db from raw/ (the DB is a disposable cache), then compact
+    it so nothing deleted stays readable in its free pages."""
     root, db = _open()
     count, unparseable = ingest.reindex(root, db)
-    click.echo(f"reindexed {count} documents")
+    scrubbed = ingest.scrub_index(db)
+    click.echo(f"reindexed {count} documents"
+               + ("" if scrubbed else " (not compacted: another tars process held the db)"))
     _exit_if_unparseable(root, unparseable)
 
 
@@ -626,12 +629,16 @@ def rm(ref: str, yes: bool):
     # target goes with it (it carries the target's file name, i.e. its title).
     kept = ingest.unlink_annotations(root, db, doc_id)
     removed = ingest.remove(root, db, doc_id)
+    scrubbed = ingest.scrub_index(db)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
     for note_id in kept:
         click.echo(f"  annotation {note_id} kept as a plain note, its link to the deleted "
                    "document dropped — `tars rm` it if unwanted")
     for linker in doctor_mod.references_to(root, raw_path.stem):
         click.echo(f"  still referenced in {linker}")
+    if not scrubbed:
+        click.echo("  its text may still be readable in tars.db (another tars process held "
+                   "it) — run `tars reindex` when nothing else is running to rebuild it clean")
     click.echo(f"  not erased: its title and origin in {store.INGEST_LOG} (append-only), "
                "the vault's git history, and any backups — rewrite those by hand if this "
                "was a secret")

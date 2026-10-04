@@ -70,7 +70,8 @@ approve a subset.
   would leave them dangling where `doctor` doesn't look (it skips raw/).
   Instead reduce it to a stub: its `aliases`, and one line, `Merged into
   [[new-person]].` Pruning a person page follows the same rule: if
-  `grep -rl "\[\[<slug>" raw/` finds links, stub it rather than delete it.
+  `grep -rlE "\[\[<slug>(\||\]\])" raw/` finds links (anchored, so
+  `alice` doesn't match `[[alice-smith…`), stub it rather than delete it.
 - Finish with `tars finalize` (hubs, index drift, invariant check) and report
   what its doctor pass says, then a summary: what changed, final concept
   count, anything left unresolved.
