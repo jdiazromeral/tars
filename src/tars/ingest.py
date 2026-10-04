@@ -115,33 +115,34 @@ _DOC_COLUMNS = "id, connector, origin, title, raw_dir, concepts"
 def find_doc(db: sqlite3.Connection, ref: str) -> sqlite3.Row:
     """The one document a reference names, as an index row.
 
-    A reference is whatever a person or agent has at hand, tried in order and
-    stopping at the first tier that matches: the id, the origin
-    (`jira:PROJ-123`), the raw file name — the wiki-link Obsidian shows, with or
-    without `[[…|alias]]`, `.md` or its `raw/…` path — and finally the source's
-    own key (`PROJ-123`, the origin after its scheme; case-insensitive). Every
-    match is exact, never fuzzy: no match raises NoSuchDocument, more than one
-    within a tier raises AmbiguousRef.
+    Precise forms first, each stopping at its match: the id, then the origin
+    (`jira:PROJ-123`; a URL is canonicalized as `web` origins are). Then the
+    two loose forms *together*, so a tie between them is never settled
+    silently: the raw file name — bare, as a `[[wiki-link|alias]]` (escaped
+    pipe too), or as a `raw/…/<name>.md` path — and the source's own key
+    (`PROJ-123`, `owner/repo#13`: the origin after its scheme). Loose forms
+    match case-insensitively. No match raises NoSuchDocument; more than one
+    match within a step raises AmbiguousRef.
     """
     ref = ref.strip()
-    stem = ref
-    if stem.startswith("[[") and stem.endswith("]]"):
-        stem = stem[2:-2]
-    stem = stem.split("|", 1)[0].split("#", 1)[0].removesuffix(".md").rsplit("/", 1)[-1]
-    tiers = [
-        ("id = ?", ref),
-        ("origin = ?", ref),
-        # raw_dir ends in "/<stem>.md"; compared by suffix, not LIKE (no wildcards)
-        ("substr(raw_dir, length(raw_dir) - length(?1) - 3) = '/' || ?1 || '.md'",
-         stem.lower()),
-        ("instr(origin, ':') > 0 AND lower(substr(origin, instr(origin, ':') + 1)) = lower(?)",
-         ref),
-    ]
-    for condition, value in tiers:
-        if not value:
-            continue
+    origins = {ref}
+    if ref.lower().startswith(("http://", "https://")):
+        origins.add(store.canonical_url(ref))
+    precise = [("id = ?", (ref,)),
+               (f"origin IN ({', '.join('?' * len(origins))})", tuple(origins))]
+
+    link = store.WIKI_LINK_RE.fullmatch(ref)
+    name = link.group(1).strip() if link else ref
+    if not link and (name.endswith(".md") or name.startswith("raw/")):
+        name = store.stem_of(name)
+    loose = ("lower(substr(raw_dir, length(raw_dir) - length(?1) - 3)) = lower('/' || ?1 || '.md') "
+             "OR (instr(origin, ':') > 0 "
+             "AND lower(substr(origin, instr(origin, ':') + 1)) = lower(?2))",
+             (name, ref))
+
+    for condition, params in [*precise, loose]:
         rows = db.execute(f"SELECT {_DOC_COLUMNS} FROM documents WHERE {condition} "
-                          "ORDER BY connector, origin", (value,)).fetchall()
+                          "ORDER BY connector, origin", params).fetchall()
         if len(rows) == 1:
             return rows[0]
         if rows:
@@ -435,7 +436,7 @@ def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
         concepts=list(dict.fromkeys([*shelved, *(store.slugify(c) for c in concepts)])),
         meta={"annotates": target["id"]},
     )
-    return add(root, db, doc)
+    return add(root, db, doc, retitle=title is not None)
 
 
 def annotations_of(db: sqlite3.Connection, doc_id: str) -> list[sqlite3.Row]:

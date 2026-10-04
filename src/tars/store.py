@@ -164,6 +164,16 @@ class RawDoc:
 TRACKING_PARAMS = re.compile(r"^(utm_\w+|gclid|fbclid|msclkid|mc_cid|mc_eid|igshid)$", re.I)
 
 
+# A [[stem]] / [[stem|alias]] / [[stem\\|alias]] wiki-link (the escaped pipe is
+# Obsidian's form inside a markdown table); group 1 is the stem.
+WIKI_LINK_RE = re.compile(r"\[\[([^\]|\\]+)(?:\\?\|[^\]]*)?\]\]")
+
+
+def stem_of(raw_dir: str) -> str:
+    """A raw file's name without `.md` — its [[wiki-link]] target."""
+    return Path(raw_dir).stem
+
+
 def canonical_url(url: str) -> str:
     """Canonical form of a URL for use as a `web` origin: identity must not
     depend on tracking junk or fragments, or the same page mints duplicates."""

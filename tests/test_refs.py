@@ -96,3 +96,50 @@ def test_an_exact_id_wins_over_other_forms(root):
     result = runner.invoke(main, ["show", doc_id, "--head", "2"])
     assert result.exit_code == 0, result.output
     assert f"id: {doc_id}" in result.output
+
+
+# --- review of #13: loose forms never pick a document silently ---
+
+def test_a_key_that_is_also_a_file_name_is_a_tie_not_a_guess(root):
+    # A note titled "PROJ-123" and the ticket PROJ-123: rm --yes on the
+    # wrong one deletes without asking, so the tie must be an error.
+    _, runner = root
+    ticket = _ticket(runner)
+    note = runner.invoke(main, ["add", "-", "--title", "PROJ-123"],
+                         input="my note").output.split()[1]
+    result = runner.invoke(main, ["rm", "PROJ-123", "--yes"])
+    assert result.exit_code != 0
+    assert ticket in result.output and note in result.output
+
+
+def test_a_github_key_is_not_cut_at_the_hash(root):
+    _, runner = root
+    pr = runner.invoke(main, ["add", "-", "--connector", "github",
+                              "--origin", "github:javi/tars#13", "--title", "PR 13"],
+                       input="pr").output.split()[1]
+    runner.invoke(main, ["add", "-", "--title", "tars"], input="a note named tars")
+    result = runner.invoke(main, ["show", "javi/tars#13", "--head", "2"])
+    assert result.exit_code == 0, result.output
+    assert f"id: {pr}" in result.output
+
+
+def test_a_url_matches_its_canonical_origin(root):
+    _, runner = root
+    page = runner.invoke(main, ["add", "-", "--connector", "web",
+                                "--origin", "https://example.com/blog/my-post",
+                                "--title", "My post"], input="page").output.split()[1]
+    result = runner.invoke(main, ["show", "https://Example.com/blog/my-post?utm_source=x#intro",
+                                  "--head", "2"])
+    assert result.exit_code == 0, result.output
+    assert f"id: {page}" in result.output
+
+
+@pytest.mark.parametrize("ref", ["[[My Plan]]", "[[my plan]]", "[[My Plan\\|label]]"])
+def test_file_names_match_case_insensitively_and_with_escaped_pipes(root, ref):
+    path, runner = root
+    doc = runner.invoke(main, ["add", "-", "--title", "plan"], input="the plan").output.split()[1]
+    (path / "raw/note/plan.md").rename(path / "raw/note/My Plan.md")
+    runner.invoke(main, ["reindex"])
+    result = runner.invoke(main, ["show", ref, "--head", "2"])
+    assert result.exit_code == 0, result.output
+    assert f"id: {doc}" in result.output

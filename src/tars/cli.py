@@ -156,14 +156,14 @@ def annotate(ref: str, text: str, title: str | None, concepts: tuple[str, ...]):
 
 
 def _annotation_lines(root: Path, db, doc_id: str) -> list[str]:
-    """One line per annotation of DOC_ID: date, id, the note's first line."""
+    """One block per annotation of DOC_ID: a `date  id` header, then its full text."""
     lines = []
     for row in ingest.annotations_of(db, doc_id):
         try:
-            first = store.read_raw(root / row["raw_dir"]).text.partition("\n")[0]
+            body = store.read_raw(root / row["raw_dir"]).text
         except store.UnparseableRaw:
-            first = f"({row['raw_dir']} is unparseable)"
-        lines.append(f"{row['captured_at'][:10]}  {row['id']}  {first}")
+            body = f"({row['raw_dir']} is unparseable)"
+        lines.append(f"{row['captured_at'][:10]}  {row['id']}\n{body}\n")
     return lines
 
 
@@ -224,7 +224,10 @@ def search(query: str, limit: int, connector: str | None, raw_match: bool,
               help="Print only lines matching this case-insensitive regex, with context.")
 @click.option("-C", "--context", default=3, show_default=True,
               help="Context lines around each --grep match.")
-def show(ref: str, path_only: bool, head: int | None, pattern: str | None, context: int):
+@click.option("--annotations", "list_annotations", is_flag=True,
+              help="List the user's annotations of this document instead of the document.")
+def show(ref: str, path_only: bool, head: int | None, pattern: str | None, context: int,
+         list_annotations: bool):
     """Print a captured document (frontmatter + full normalized text).
 
     A capture can be tens of thousands of tokens (meeting transcripts); --head
@@ -232,13 +235,18 @@ def show(ref: str, path_only: bool, head: int | None, pattern: str | None, conte
     print. --grep output carries 1-based line numbers so a follow-up can aim
     wider (-C) or deeper at the same spot.
     """
-    if sum((path_only, head is not None, pattern is not None)) > 1:
-        raise click.ClickException("choose at most one of --path / --head / --grep")
+    if sum((path_only, head is not None, pattern is not None, list_annotations)) > 1:
+        raise click.ClickException(
+            "choose at most one of --path / --head / --grep / --annotations")
     root, db = _open()
     row = _doc_row(db, ref)
     raw_path = root / row["raw_dir"]
     if path_only:
         click.echo(raw_path)
+        return
+    if list_annotations:
+        for line in _annotation_lines(root, db, row["id"]):
+            click.echo(line)
         return
     text = raw_path.read_text()
     if pattern is not None:
@@ -247,15 +255,13 @@ def show(ref: str, path_only: bool, head: int | None, pattern: str | None, conte
         except re.error as exc:
             raise click.ClickException(f"bad --grep pattern: {exc}")
     else:
-        body = view.head(text, head) if head is not None else text
-        click.echo(body)
-        notes = _annotation_lines(root, db, row["id"])
-        if notes:
-            if not body.endswith("\n"):
-                click.echo()  # one blank line before the section, whatever the body ends with
-            click.echo(f"── annotations ({len(notes)}) — `tars show <id>` for one in full ──")
-            for line in notes:
-                click.echo(line)
+        click.echo(view.head(text, head) if head is not None else text)
+        # A pointer, not the notes themselves: skills mine this output for what
+        # the *source* says, and the user's words must not read as part of it.
+        count = len(ingest.annotations_of(db, row["id"]))
+        if count:
+            click.echo(f"── {count} annotation{'s' * (count > 1)} of yours on this document: "
+                       f"`tars show {row['id']} --annotations` ──")
 
 
 @main.command(name="list")
