@@ -257,7 +257,14 @@ def read_raw(content_md: Path) -> RawDoc:
     if not raw.startswith("---\n"):
         raise ValueError(f"{content_md}: missing frontmatter")
     header, _, body = raw[4:].partition("\n---\n")
-    fm = yaml.safe_load(header)
+    # Every way a file can fail to parse surfaces as ValueError (UnicodeDecodeError
+    # is one too), so readers can skip and name a bad file instead of crashing.
+    try:
+        fm = yaml.safe_load(header)
+    except yaml.YAMLError as exc:
+        raise ValueError(f"{content_md}: frontmatter is not valid YAML") from exc
+    if not isinstance(fm, dict) or not {"connector", "origin"} <= fm.keys():
+        raise ValueError(f"{content_md}: frontmatter lacks connector/origin")
     text = body.strip("\n")
 
     # The Concepts: line is a derived rendering — strip it back out of the body.

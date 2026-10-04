@@ -328,8 +328,19 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
 def reindex():
     """Rebuild tars.db from raw/ (the DB is a disposable cache)."""
     root, db = _open()
-    count = ingest.reindex(root, db)
+    count, unparseable = ingest.reindex(root, db)
     click.echo(f"reindexed {count} documents")
+    _exit_if_unparseable(root, unparseable)
+
+
+def _exit_if_unparseable(root: Path, unparseable: list[tuple[Path, str]]) -> None:
+    """Name every raw file a rebuild had to skip, then exit non-zero."""
+    if not unparseable:
+        return
+    for path, reason in unparseable:
+        click.echo(f"  unparseable  {path.relative_to(root)}  {reason} — not indexed")
+    click.echo(f"{len(unparseable)} raw file(s) skipped; fix or remove them and reindex")
+    sys.exit(1)
 
 
 @main.command()
@@ -360,9 +371,10 @@ def migrate():
         store.write_raw(root, doc, content_md)
         rewritten += 1
     (root / store.MARKER).write_text(f"version: {store.SCHEMA_VERSION}\n")
-    count = ingest.reindex(root, db)
+    count, unparseable = ingest.reindex(root, db)
     click.echo(f"migrated vault at {root} to v{store.SCHEMA_VERSION}: "
                f"rewrote {rewritten} raw files, reindexed {count}")
+    _exit_if_unparseable(root, unparseable)
 
 
 @main.command()
@@ -445,7 +457,8 @@ def finalize():
         # hash is usually a hand-edit to raw/, and a bare count would hide it.
         for f in drift:
             click.echo(f"  {f.path}  {f.detail.removesuffix(' — run `tars reindex`')}")
-        count = ingest.reindex(root, db)
+        # Unparseable files resurface as doctor findings below, so the list isn't echoed twice.
+        count, _ = ingest.reindex(root, db)
         click.echo(f"reindex: {count} document(s) (drift cleared)")
     else:
         click.echo("reindex: skipped (no drift)")
