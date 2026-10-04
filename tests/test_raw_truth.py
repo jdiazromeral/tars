@@ -132,7 +132,7 @@ def test_unparseable_file_keeps_its_index_row(root):
     # file is repaired, so an append fails loudly instead.
     path, runner = root
     for line in ("entry one", "entry two"):
-        _add(runner, line, "--append", "--connector", "activity",
+        _add(runner, line, "--append", "--create", "--connector", "activity",
              "--origin", "activity:d1", "--title", "d1")
     raw = path / "raw/activity/d1.md"
     raw.write_text(raw.read_text().replace("tags: []", "tags: [unclosed"))
