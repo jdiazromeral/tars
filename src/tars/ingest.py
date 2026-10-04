@@ -24,9 +24,15 @@ class Resolved:
     extracted: extract.Extracted
 
 
+def lf(text: str) -> str:
+    """One line ending: CRLF/CR text would otherwise hash differently from the
+    same words in LF, and a raw file written with CRs reads back without them."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def note_origin(text: str) -> str:
     """Content-addressed origin for the user's own words: re-pasting dedupes."""
-    return f"note:{store.content_hash(text)[:12]}"
+    return f"note:{store.content_hash(lf(text))[:12]}"
 
 
 def resolve_target(target: str, *, stdin: TextIO | None = None,
@@ -198,6 +204,7 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     The ingestion event is logged before the raw write (see `ingestlog`) and
     inside the write lock, so the log's order matches the commit order.
     """
+    doc.text = lf(doc.text)
     # Canonicalize: read_raw strips outer newlines, so text must be hashed in
     # that same form or a connector passing a trailing "\n" (github did) makes
     # every stored hash stale on re-read — permanent db-drift + upsert churn.

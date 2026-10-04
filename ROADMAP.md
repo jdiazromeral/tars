@@ -152,10 +152,14 @@ annotations (new notes that point at it), never edits to it.
   YAML for `: ` titles and can mint a stem that collides with a raw doc.
 - [ ] **H. What `rm` doesn't erase** — free pages of tars.db, the log (title,
   origin), hubs, vault git history, backups. `rm` only mentions links.
-- [ ] **I. Input edge cases** — `sweep` lossily decodes non-UTF-8 and deletes
+- [x] **I. Input edge cases** — `sweep` lossily decodes non-UTF-8 and deletes
   the original; CRLF text gets a hash that never matches (2 reviewers); a
   Slack DM is swept when `--channel-type` is omitted; NFC/NFD Hangul titles
   share one file on APFS; `normalize` rewrites inside URLs.
+  Fixed: sweep and `tars add <file>` decode strictly (a non-UTF-8 drop stays
+  in inbox/); line endings are LF in content and in note origins; titles are
+  NFC before slugging; vocab rules skip URLs; `slack select` requires
+  `--channel-type` and refuses any `D…` id.
 - [ ] **J. Skills promising what they don't do** — `end-of-day` calls itself
   read-only but runs `sync-all` (which labels Gmail); `gardener` leaves raw
   person links dangling and never finalizes; `digest`/`tasks` disagree on

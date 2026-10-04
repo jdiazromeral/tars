@@ -55,7 +55,12 @@ def sweep(root: Path, db: sqlite3.Connection) -> list[Drop]:
         if f.suffix.lower() not in TEXT_SUFFIXES:
             drops.append(Drop(f.name, "skipped"))
             continue
-        text = f.read_text(errors="replace").strip()
+        try:
+            text = f.read_text(encoding="utf-8").strip()
+        except UnicodeDecodeError:  # never decode lossily and then unlink the only copy
+            drops.append(Drop(f.name, "kept", title="not UTF-8 text — convert it "
+                              "(e.g. `iconv -f latin1 -t utf-8`) and drop it again"))
+            continue
         if not text:
             f.unlink()
             drops.append(Drop(f.name, "empty"))
