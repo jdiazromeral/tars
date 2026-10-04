@@ -105,3 +105,20 @@ def test_reindex_failure_keeps_the_old_index(root, monkeypatch):
     with pytest.raises(RuntimeError):
         ingest.reindex(path, conn)
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 3
+
+
+def test_doctor_and_finalize_report_unparseable_raw(root):
+    # A file that doesn't parse is a finding, not a traceback.
+    path, runner = root
+    _add(runner, "fine", "--title", "ok")
+    (path / "raw/note/broken.md").write_text("---\nid: x\n")
+
+    result = runner.invoke(main, ["doctor"])
+    assert result.exit_code == 1
+    assert "unparseable-raw" in result.output
+    assert "raw/note/broken.md" in result.output
+
+    result = runner.invoke(main, ["finalize"])
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "raw/note/broken.md" in result.output

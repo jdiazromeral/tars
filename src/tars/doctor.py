@@ -104,15 +104,26 @@ def unhubbed_concepts(root: Path, db: sqlite3.Connection) -> list[Finding]:
 
 
 def db_drift(root: Path, db: sqlite3.Connection) -> list[Finding]:
+    """Raw files vs index rows. A file that doesn't parse is its own finding
+    (`unparseable-raw`), and its index row isn't also reported as missing."""
     raw_docs = {}
+    findings = []
+    unparseable = set()
     for content_md in store.iter_raw(root):
-        doc = store.read_raw(content_md)
+        rel = str(content_md.relative_to(root))
+        try:
+            doc = store.read_raw(content_md)
+        except ValueError as exc:
+            unparseable.add(rel)
+            reason = str(exc).removeprefix(f"{content_md}: ")
+            findings.append(Finding("unparseable-raw", rel,
+                                    f"{reason} — repair it by hand or restore it from git"))
+            continue
         raw_docs[doc.id] = (content_md, doc)
 
     db_rows = {row["id"]: row for row in
                db.execute("SELECT id, raw_dir, content_hash FROM documents")}
 
-    findings = []
     for doc_id, (path, doc) in raw_docs.items():
         rel = str(path.relative_to(root))
         row = db_rows.get(doc_id)
@@ -126,7 +137,7 @@ def db_drift(root: Path, db: sqlite3.Connection) -> list[Finding]:
             findings.append(Finding("db-drift", rel, "content hash stale — run `tars reindex`"))
 
     for doc_id, row in db_rows.items():
-        if doc_id not in raw_docs:
+        if doc_id not in raw_docs and row["raw_dir"] not in unparseable:
             findings.append(Finding(
                 "db-drift", row["raw_dir"], "indexed but raw file missing — run `tars reindex`"))
     return findings

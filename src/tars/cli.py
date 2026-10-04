@@ -451,7 +451,7 @@ def finalize():
     """
     root, db = _open()
 
-    drift = doctor_mod.db_drift(root, db)
+    drift = [f for f in doctor_mod.db_drift(root, db) if f.check == "db-drift"]
     if drift:
         # Name every drifted file before reindex absorbs it: a stale content
         # hash is usually a hand-edit to raw/, and a bare count would hide it.
