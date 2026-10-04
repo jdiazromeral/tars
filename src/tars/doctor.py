@@ -11,7 +11,6 @@ pointed at) — doctor names the problem and the fix, it doesn't guess.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +21,7 @@ from . import store
 # vault (store.py's Concepts: line, hubs.py's Sources entries) — plus
 # [[stem\|label]], Obsidian's escaped-pipe form required inside Markdown
 # tables (the roadmap hubs use it); the target must not swallow the escape.
-_LINK_RE = re.compile(r"\[\[([^\]|\\]+)(?:\\?\|[^\]]*)?\]\]")
+_LINK_RE = store.WIKI_LINK_RE
 
 # Layers that hold hand-or-agent-authored links worth checking. raw/ is
 # excluded on purpose: captured third-party text can contain literal

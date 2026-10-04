@@ -90,22 +90,8 @@ def test_a_resync_of_the_target_keeps_its_annotations(root):
     _annotate(runner, "PROJ-123", "my take")
     _ticket(runner, text="Migrate auth to OIDC. Estimate 5 sprints.")  # upstream changed
 
-    result = runner.invoke(main, ["show", "PROJ-123"])
-    assert "Estimate 5 sprints" in result.output
-    assert "my take" in result.output
-
-
-def test_show_lists_annotations_after_the_document(root):
-    _, runner = root
-    _ticket(runner)
-    note_id = _annotate(runner, "PROJ-123", "first thought\nmore detail").output.split()[1]
-
-    for args in (["show", "PROJ-123"], ["show", "PROJ-123", "--head", "3"]):
-        out = runner.invoke(main, args).output
-        assert "annotations (1)" in out, out
-        assert note_id in out and "first thought" in out
-        assert "more detail" not in out  # one line each; `tars show <id>` for the rest
-    assert "annotations (" not in runner.invoke(main, ["show", "PROJ-123", "--path"]).output
+    assert "Estimate 5 sprints" in runner.invoke(main, ["show", "PROJ-123"]).output
+    assert "my take" in runner.invoke(main, ["show", "PROJ-123", "--annotations"]).output
 
 
 def test_search_marks_an_annotation_hit_with_its_target(root):
@@ -150,3 +136,30 @@ def test_annotating_nothing_is_an_error(root):
     _ticket(runner)
     assert _annotate(runner, "PROJ-123", "-", stdin="  \n").exit_code != 0
     assert "no document matches" in _annotate(runner, "PROJ-999", "x").output
+
+
+# --- review of #13 ---
+
+def test_an_explicit_title_retitles_a_repeated_annotation(root):
+    path, runner = root
+    _ticket(runner)
+    _annotate(runner, "PROJ-123", "x")
+    result = _annotate(runner, "PROJ-123", "x", "--title", "Estimate risk")
+    assert result.output.startswith("updated"), result.output
+    assert store.read_raw(next(path.glob("raw/note/*.md"))).title == "Estimate risk"
+
+
+def test_show_points_at_annotations_without_mixing_them_into_the_source(root):
+    # Skills mine `show` output for commitments; the user's words must not
+    # read as part of the meeting or ticket. show names how many there are,
+    # --annotations lists them.
+    _, runner = root
+    _ticket(runner)
+    note_id = _annotate(runner, "PROJ-123", "I'll ask Ana to redo it").output.split()[1]
+
+    out = runner.invoke(main, ["show", "PROJ-123"]).output
+    assert "Ana" not in out
+    assert "1 annotation" in out and "--annotations" in out
+    listed = runner.invoke(main, ["show", "PROJ-123", "--annotations"]).output
+    assert note_id in listed and "I'll ask Ana to redo it" in listed
+    assert "Migrate auth" not in listed

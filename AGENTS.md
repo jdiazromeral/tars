@@ -56,18 +56,21 @@ tars.db                           disposable index — tars reindex rebuilds it
   add to it with `--append` (which keeps the title and tags it doesn't
   restate), or capture a new note. `--append` to an origin that holds nothing
   fails unless `--create` (track's first entry of the day). Only `tars
-  normalize` may rewrite authored text, as a sanctioned vocab fix.
+  normalize` may rewrite authored text, as a sanctioned vocab fix. Every
+  decision is made against the raw file, read under the write lock and
+  matched by the id inside it — the index only helps find it, and may be
+  stale or missing. Tags, like concepts, only grow on a re-add. A
+  content-addressed origin (`note:<hash>`, `file:<hash>`) *is* its text:
+  re-adding it never changes the stored words or provenance (an explicit
+  `--title` still retitles).
 - **Annotations never touch their target.** The user's words *about* a
   captured document (`tars annotate <ref> <text|->`) are a `note` of their own
   with `meta.annotates: <target id>`, inheriting the target's concepts. A
-  re-sync of the target can't lose them; `tars show` lists them under it, a
-  search hit on one is marked `↳ on [[target]]`, and `tars rm` of the target
-  warns and keeps them (they are the user's words). Every
-  decision is made against the raw file, read under the write lock and
-  matched by the id inside it — the index only helps find it, and may be
-  stale or missing. Tags, like concepts, only grow on a re-add. A content-addressed
-  origin (`note:<hash>`, `file:<hash>`) *is* its text: re-adding it never
-  changes the stored words, title or provenance.
+  re-sync of the target can't lose them. They are kept *out* of the target's
+  own output — `tars show` names how many there are, `tars show <ref>
+  --annotations` lists them — so nothing mining a source for commitments
+  reads the user's words as the source's. A search hit on one is marked
+  `↳ on [[target]]`; `tars rm` of the target warns and keeps them.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
   after ingest (comments, status, state). The incremental watermark only
   *discovers* changes for items in scope (e.g. assigned to me); an item pulled
@@ -226,8 +229,8 @@ properties — keep them straight:
   `--create`), `tars sweep`, `tars annotate <ref> <text|-> [--concept ...]`,
   `tars tag|untag <ref> --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
-  `tars show <ref> [--path | --head N | --grep <regex> [-C N]]` (token-frugal
-  slices; a full show on a transcript can be ~30k tokens),
+  `tars show <ref> [--path | --head N | --grep <regex> [-C N] | --annotations]`
+  (token-frugal slices; a full show on a transcript can be ~30k tokens),
   `tars list [--connector ...] [--since <ISO>] [--json]`,
   `tars promote <ref> --title ...`, `tars rm <ref> [--yes]`,
   `tars cursor <connector> [--set ... | --begin | --commit]`,

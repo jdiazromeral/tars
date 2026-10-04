@@ -6,6 +6,8 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
+from . import store
+
 
 @dataclass
 class Hit:
@@ -18,10 +20,6 @@ class Hit:
     file: str  # raw filename stem — the [[wiki-link]] target for this document
     chunk: str | None = None  # full text of the best-matching chunk (opt-in)
     annotates: str | None = None  # an annotation's target, as its file stem (wiki-link)
-
-
-def _stem(raw_dir: str) -> str:
-    return raw_dir.rsplit("/", 1)[-1].removesuffix(".md")
 
 
 def to_match_expr(query: str) -> str:
@@ -69,9 +67,10 @@ def search(db: sqlite3.Connection, query: str, k: int = 8,
         hits.append(Hit(doc_id=row["id"], connector=row["connector"],
                         origin=row["origin"], title=row["title"],
                         snippet=row["snip"], score=row["score"],
-                        file=_stem(row["raw_dir"]),
+                        file=store.stem_of(row["raw_dir"]),
                         chunk=row["chunk_text"] if with_chunk else None,
-                        annotates=_stem(row["target_raw_dir"]) if row["target_raw_dir"] else None))
+                        annotates=(store.stem_of(row["target_raw_dir"])
+                                   if row["target_raw_dir"] else None)))
         if len(hits) >= k:
             break
     return hits
