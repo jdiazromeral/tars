@@ -42,10 +42,13 @@ def _doc_row(db, ref: str, *, loose: bool = True):
     try:
         return ingest.find_doc(db, ref, loose=loose)
     except ingest.NoSuchDocument:
-        tried = "id, origin, raw/ path" + (", file name, source key" if loose else "")
+        if not loose:  # only rm --yes asks for exact forms
+            raise click.ClickException(
+                f"rm --yes needs an exact reference (id, origin or raw/ path), not {ref!r} — "
+                f"run `tars rm {ref}` to confirm what it matches, or pass the id")
         raise click.ClickException(
-            f"no document matches {ref!r} (tried {tried}) — "
-            f"find it with `tars search {ref}`")
+            f"no document matches {ref!r} (tried id, origin, raw/ path, file name, "
+            f"source key) — find it with `tars search {ref}`")
     except ingest.AmbiguousRef as exc:
         lines = "\n".join(f"  {r['id']}  [{r['connector']}] {r['origin']}  {r['title'] or ''}"
                           for r in exc.candidates)
@@ -133,7 +136,7 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
 @main.command(epilog=REF_HELP)
 @click.argument("ref")
 @click.argument("text")
-@click.option("--title", help="Title for the annotation (default: 'On <target title>').")
+@click.option("--title", help="Title for the annotation (default: its own first line).")
 @click.option("--concept", "concepts", multiple=True,
               help="Concept slug(s) beyond the ones inherited from the target; repeatable.")
 def annotate(ref: str, text: str, title: str | None, concepts: tuple[str, ...]):
@@ -165,7 +168,7 @@ def _annotation_lines(root: Path, db, doc_id: str) -> list[str]:
         try:
             body = store.read_raw(root / row["raw_dir"]).text
         except store.UnparseableRaw:
-            body = f"({row['raw_dir']} is unparseable)"
+            body = f"({row['raw_dir']} is missing or unparseable — run `tars doctor`)"
         lines.append(f"{row['captured_at'][:10]}  {row['id']}\n{body}\n")
     return lines
 
@@ -263,8 +266,9 @@ def show(ref: str, path_only: bool, head: int | None, pattern: str | None, conte
         # the *source* says, and the user's words must not read as part of it.
         count = len(ingest.annotations_of(db, row["id"]))
         if count:
+            # stderr: stdout stays exactly the document (`show > copy.md`, --head N)
             click.echo(f"── {count} annotation{'s' * (count > 1)} of yours on this document: "
-                       f"`tars show {row['id']} --annotations` ──")
+                       f"`tars show {row['id']} --annotations` ──", err=True)
 
 
 @main.command(name="list")
@@ -595,15 +599,7 @@ def rm(ref: str, yes: bool):
     root, db = _open()
     # --yes deletes with no prompt, so it never acts on a guess: only an exact
     # reference (id, origin, raw/ path). A loose one must be confirmed by eye.
-    if yes:
-        try:
-            row = ingest.find_doc(db, ref, loose=False)
-        except ingest.NoSuchDocument:
-            raise click.ClickException(
-                f"rm --yes needs an exact reference (id, origin or raw/ path), not {ref!r} — "
-                f"run `tars rm {ref}` to confirm what it matches, or pass the id")
-    else:
-        row = _doc_row(db, ref)
+    row = _doc_row(db, ref, loose=not yes)
     doc_id = row["id"]
     raw_path = root / row["raw_dir"]
     if not yes:

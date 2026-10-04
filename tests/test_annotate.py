@@ -171,3 +171,27 @@ def test_words_starting_with_a_dash_go_after_double_dash(root):
     result = _annotate(runner, "PROJ-123", "--", "-1 on this estimate")
     assert result.exit_code == 0, result.output
     assert store.read_raw(next(path.glob("raw/note/*.md"))).text == "-1 on this estimate"
+
+
+def test_show_stdout_is_only_the_document(root):
+    # The pointer goes to stderr: `show > copy.md` and --head N stay exact.
+    path, runner = root
+    _ticket(runner)
+    _annotate(runner, "PROJ-123", "a note")
+    result = runner.invoke(main, ["show", "PROJ-123"])
+    assert result.stdout == (path / "raw/jira/proj-123-migrate-auth-to-oidc.md").read_text() + "\n"
+    assert "1 annotation" in result.stderr
+
+
+def test_an_annotation_never_copies_its_targets_title(root):
+    # rm of a target with a secret in its title keeps the annotations; their
+    # title and file name must not carry that secret along.
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--connector", "jira", "--origin", "jira:P-1",
+                         "--title", "P-1 token AKIA123"], input="x")
+    _annotate(runner, "P-1", "this ticket leaked a token\nrotate it")
+    runner.invoke(main, ["rm", "jira:P-1", "--yes"])
+    note_file = next(path.glob("raw/note/*.md"))
+    assert "akia123" not in note_file.name.lower()
+    assert "AKIA123" not in note_file.read_text()
+    assert store.read_raw(note_file).title == "this ticket leaked a token"
