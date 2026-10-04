@@ -161,8 +161,9 @@ never touch these cursors.
 
 ## B3. Discover threads — the CLI selects, you don't
 
-Per channel, page `slack_read_channel` with `oldest=<watermark>` until
-exhausted, then hand the raw history to the CLI and capture what it returns:
+Per channel, page `slack_read_channel` with `oldest=<epoch>` — `tars cursor
+"slack/<CHANNEL_ID>" --as epoch`, Slack's own form — until exhausted, then
+hand the raw history to the CLI and capture what it returns:
 
 ```sh
 echo '<conversations.history JSON>' \
@@ -170,7 +171,8 @@ echo '<conversations.history JSON>' \
 ```
 
 It answers `{selected: [{thread_ts, signal, reply_count, reaction_total}],
-skipped: {reason: n}, truncated: bool}`.
+skipped: {reason: n}, truncated: bool, resume_from: <ISO> | null}`. Selection
+runs oldest-first, so a capped run keeps the oldest threads.
 
 **Do not re-derive the rules here.** They live in
 `connectors/slack.py:select()` and are covered by `tests/test_slack_select.py`
@@ -186,8 +188,10 @@ matches; a false negative is permanently absent), and the anti-signal nullifies
 qualifies, on the attachment.
 
 If `truncated` is true the run hit `max_threads_per_run`: capture what came
-back and **do not commit the watermark** (B2) — the next run resumes from the
-same point instead of skipping what was cut.
+back, then — instead of `--commit` — move the watermark to the last thread
+captured: `tars cursor "slack/<CHANNEL_ID>" --set "<resume_from>"`. The next
+run starts right after it (`oldest=` is exclusive). Not committing at all would
+re-read the same window and re-select the same oldest threads forever.
 
 ### Refresh already-ingested threads (mutable sources go stale)
 
@@ -248,8 +252,8 @@ admitted each** (attachment / reactions / pinned / link / length), refreshed
 threads that actually grew, and the CLI's own `skipped` tally verbatim — it
 already counts by reason (`no-signal`, `redundant-link-only`,
 `bot-or-subtype`, `over-run-cap`), so pass it through rather than recounting.
-Then the new watermark, or **"uncommitted"** with the reason (an error, or
-`truncated` — see B3). Finally people linked/backfilled and concepts created vs
+Then the new watermark — or **"resumes at <resume_from>"** when `truncated`
+(B3), or **"uncommitted"** with the error. Finally people linked/backfilled and concepts created vs
 reused. Naming the admitting signal is what makes the thresholds tunable from
 evidence instead of taste; naming every skipped class is what keeps silent
 truncation from reading as coverage.
@@ -289,7 +293,8 @@ truncation from reading as coverage.
   `window_days`, and B4 assembles each thread verbatim in-context, so a wide
   first sweep is one long agent run with real context-exhaustion risk. Prefer a
   short `window_days` on first contact, and lean on `max_threads_per_run`: a
-  truncated run withholds its watermark, so resuming is just running again.
+  truncated run moves its watermark to the last thread it captured, so
+  resuming is just running again.
 - **Attachment `file_id`s live in the document body**, not in structured
   metadata (`tars add` has no `--meta`, and adding one is out of scope here).
   The follow-up that ingests attachment *content* will have to parse them back
