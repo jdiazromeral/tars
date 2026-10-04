@@ -48,7 +48,7 @@ def search(db: sqlite3.Connection, query: str, k: int = 8,
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.rowid
         JOIN documents d ON d.id = c.doc_id
-        LEFT JOIN documents t ON t.id = json_extract(d.meta, '$.annotates')
+        LEFT JOIN documents t ON t.id = json_extract(d.meta, '$.annotates_id')
         WHERE chunks_fts MATCH ?
     """
     params: list = [match]

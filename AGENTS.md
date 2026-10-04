@@ -65,7 +65,10 @@ tars.db                           disposable index — tars reindex rebuilds it
   `--title` still retitles).
 - **Annotations never touch their target.** The user's words *about* a
   captured document (`tars annotate <ref> <text|->`) are a `note` of their own
-  with `meta.annotates: <target id>`, inheriting the target's concepts. A
+  with `meta.annotates_id: <target id>` (what tars resolves) and a top-level
+  `annotates: "[[target-stem]]"` property (the link Obsidian shows in the
+  target's backlinks), both written once by `annotate`; it inherits the
+  target's concepts and is titled by its own first line, never the target's. A
   re-sync of the target can't lose them. They are kept *out* of the target's
   own output — `tars show` names how many there are, `tars show <ref>
   --annotations` lists them — so nothing mining a source for commitments

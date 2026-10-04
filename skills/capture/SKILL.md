@@ -58,6 +58,11 @@ Route rules:
   document or several, the error lists the candidates: ask which one, or
   `tars search` for it. Retrying is safe (the same words on the same target
   are one note).
+- **Annotated the wrong document?** An annotation is never edited in place:
+  annotate the right one with the same words, *then* `tars rm <note-id>
+  --yes` the wrong one (the id is exact, so `--yes` is allowed). An
+  annotation whose target was removed simply stays a note of the user's —
+  leave it unless they ask.
 - Piped text needs `--title` (nothing to extract one from). For multi-line
   text, write a scratch file and pipe it — heredocs mangle special characters.
 

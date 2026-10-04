@@ -155,6 +155,10 @@ class RawDoc:
     tags: list[str] = field(default_factory=list)
     concepts: list[str] = field(default_factory=list)
     meta: dict = field(default_factory=dict)
+    # An annotation's target as a wiki-link ("[[stem]]"), written as a top-level
+    # property because that is what Obsidian reads as a link (backlinks); tars
+    # resolves the target by meta["annotates_id"]. None for every other doc.
+    annotates: str | None = None
 
     @property
     def id(self) -> str:
@@ -234,6 +238,15 @@ def raw_path_for(root: Path, doc: RawDoc, existing: str | None = None) -> Path:
     return candidate
 
 
+class _DoubleQuoted(str):
+    """Emitted as "…": Obsidian's own form for a link inside a property."""
+
+
+yaml.SafeDumper.add_representer(
+    _DoubleQuoted, lambda dumper, data: dumper.represent_scalar(
+        "tag:yaml.org,2002:str", str(data), style='"'))
+
+
 def write_raw(root: Path, doc: RawDoc, path: Path,
               source_bytes: bytes | None = None,
               source_ext: str | None = None) -> Path:
@@ -249,6 +262,8 @@ def write_raw(root: Path, doc: RawDoc, path: Path,
         "concepts": doc.concepts,
         "meta": doc.meta,
     }
+    if doc.annotates:
+        frontmatter["annotates"] = _DoubleQuoted(doc.annotates)
     header = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     payload = f"---\n{header}\n---\n\n{render_body(doc)}\n"
     # Raw is truth: leave the file untouched (bytes AND mtime) when nothing changed,
@@ -305,6 +320,8 @@ def _frontmatter_problem(fm) -> str | None:
             return f"`{key}` must be a list of strings"
     if fm.get("meta") is not None and not isinstance(fm["meta"], dict):
         return "`meta` must be a mapping"
+    if fm.get("annotates") is not None and not isinstance(fm["annotates"], str):
+        return "`annotates` must be a single [[link]] string"
     if fm.get("captured_at") is not None and not isinstance(fm["captured_at"], (str, datetime)):
         return "`captured_at` must be a timestamp"
     return None
@@ -365,6 +382,7 @@ def read_raw(content_md: Path, v1: bool = False) -> RawDoc:
         tags=fm.get("tags") or [],
         concepts=concepts,
         meta=meta,
+        annotates=fm.get("annotates"),
     )
 
 

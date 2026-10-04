@@ -47,7 +47,7 @@ def test_annotation_is_a_note_that_points_at_its_target(root):
     assert note.id == note_id
     assert note.connector == "note"
     assert note.text == "the estimate ignores the SSO migration"
-    assert note.meta["annotates"] == target
+    assert note.meta["annotates_id"] == target
     assert note.concepts == ["auth"]  # inherited, so it lands in the same hubs
     # the target is untouched, byte for byte
     assert (path / "raw/jira/proj-123-migrate-auth-to-oidc.md").read_text() == before
