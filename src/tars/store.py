@@ -261,8 +261,12 @@ def read_raw(content_md: Path) -> RawDoc:
     text = body.strip("\n")
 
     # The Concepts: line is a derived rendering — strip it back out of the body.
+    # v2 writes it only for a shelved doc, so an unshelved doc's text that merely
+    # starts with "Concepts: " is the user's content and must survive the read.
+    # v1 (no `concepts` key) always gets the old strip; migrate depends on it.
     line_concepts: list[str] = []
-    if text.startswith("Concepts: "):
+    derived_line = bool(fm.get("concepts")) or "concepts" not in fm
+    if derived_line and text.startswith("Concepts: "):
         first, _, rest = text.partition("\n")
         line_concepts = re.findall(r"\[\[([^\]|]+)\]\]", first)
         text = rest.lstrip("\n")
