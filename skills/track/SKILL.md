@@ -27,7 +27,8 @@ It is also not `tasks/`. A task is a commitment with an owned lifecycle
 (`open → done`, one file forever, status changes belong to the user). Activity
 is an **event**: immutable, append-many, no status. It lives in `raw/`, under
 its own `activity` connector — no connector code behind it, the generic
-`tars add - --connector --origin --append` pipe carries the whole thing.
+`tars add - --append --create --connector --origin` pipe carries the whole
+thing (`--create` lets the day's first entry start the record).
 
 ## The record
 

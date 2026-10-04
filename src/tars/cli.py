@@ -86,6 +86,8 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
         raise click.ClickException("--append requires --origin (the document to append to)")
     if create and not append:
         raise click.ClickException("--create only applies with --append")
+    if append and target != "-":
+        raise click.ClickException("--append takes text on stdin ('-'), not a file or URL")
     root, db = _open()
     resolved = _try(lambda: ingest.resolve_target(target, stdin=sys.stdin, origin=origin))
     extracted = resolved.extracted
@@ -234,8 +236,8 @@ def list_(connector: str | None, since: str | None, as_json: bool):
 def tag(doc_id: str, concepts: tuple[str, ...]):
     """Attach concept wiki-links to an already-captured document (idempotent merge)."""
     root, db = _open()
-    _doc_row(db, doc_id)
-    status, merged = _shelve(root, db, doc_id, add=[store.slugify(c) for c in concepts])
+    status, merged = _shelve(root, db, doc_id,
+                             add_concepts=[store.slugify(c) for c in concepts])
     click.echo(f"{status}  {doc_id}  concepts: {', '.join(merged)}")
 
 
@@ -246,14 +248,16 @@ def tag(doc_id: str, concepts: tuple[str, ...]):
 def untag(doc_id: str, concepts: tuple[str, ...]):
     """Remove concept wiki-links from a document (idempotent; the inverse of tag)."""
     root, db = _open()
-    _doc_row(db, doc_id)
-    status, left = _shelve(root, db, doc_id, remove=[store.slugify(c) for c in concepts])
+    status, left = _shelve(root, db, doc_id,
+                           remove_concepts=[store.slugify(c) for c in concepts])
     click.echo(f"{status}  {doc_id}  concepts: {', '.join(left) or '(none)'}")
 
 
 def _shelve(root, db, doc_id: str, **change):
     try:
         return ingest.shelve(root, db, doc_id, **change)
+    except ingest.NoSuchDocument:
+        raise click.ClickException(f"no document with id {doc_id}")
     except store.UnparseableRaw as exc:
         raise click.ClickException(f"{exc} — repair it before shelving this document")
 
@@ -588,17 +592,18 @@ def normalize():
     rules = normalize_mod.load_rules(root)
     if not rules:
         raise click.ClickException(f"no {normalize_mod.VOCAB_FILE} at {root} — nothing to do")
-    changed = 0
+    changed, unparseable = 0, []
     for content_md in store.iter_raw(root):
-        doc = store.read_raw(content_md)
-        before = doc.text
-        if normalize_mod.apply(before, rules, doc.connector) != before:
-            # normalize is a sanctioned rewrite of authored text
-            _, status = ingest.add(root, db, doc, replace=True)
-            if status != "unchanged":
-                changed += 1
-                click.echo(f"  normalized {doc.id}  {content_md.name}")
+        try:
+            status = ingest.renormalize(root, db, content_md, rules)
+        except store.UnparseableRaw as exc:
+            unparseable.append((content_md, exc.reason))
+            continue
+        if status == "updated":
+            changed += 1
+            click.echo(f"  normalized  {content_md.relative_to(root)}")
     click.echo(f"normalized {changed} document(s)")
+    _exit_if_unparseable(root, unparseable, rerun="tars normalize")
 
 
 @main.command()
