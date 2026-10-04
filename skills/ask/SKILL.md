@@ -25,6 +25,11 @@ never the default (one meeting capture can be ~30k tokens).
    - Use your native file-reading tools to read the file directly from disk. Read only the first ~40 lines (frontmatter + opening) unless the answer genuinely requires the full document.
    Also grep `wiki/notes/` — promoted insights outrank raw captures when they
    conflict.
+   - A hit with an `annotates` key is the user's own note *about* that
+     document (`tars annotate`): their view, not the source's — cite it as
+     such, and read the target too when the answer depends on it. Before
+     concluding from a document alone, `tars show <file> --head 1` lists its
+     annotations at the end.
 4. **Log vocabulary misses.** If the first phrasing found nothing useful and a
    reformulation did — the idea was in the corpus under different words — append
    one line to `retrieval-misses.md` at the vault root:

@@ -124,6 +124,7 @@ Make sure your shell profile exports `TARS_HOME` so the agent can find the vault
 tars add https://example.com/article
 tars add ~/Downloads/paper.pdf
 echo "decision: we keep snowflake exports weekly" | tars add -
+tars annotate PROJ-123 "the estimate ignores the SSO work"   # your note on a capture
 tars search "snowflake exports" -v   # -v includes each hit's matching chunk
 tars show PROJ-123 --head 20        # id, origin, file name or key; --grep for slices
 tars status

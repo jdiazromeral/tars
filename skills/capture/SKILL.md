@@ -1,6 +1,6 @@
 ---
 name: capture
-description: Save something into TARS — an external source (URL, file, pasted excerpt), the user's own words (a thought, note-to-self, running note), or an agent-authored synthesis of session work. Trigger on "save this", "capture this", "add to tars/my brain", a bare URL/file drop meant for keeping, "note this down", "note to self", "jot this", "save the work to tars", "record what we did". Routes by whose words it is; verbatim except for agent-authored work records.
+description: Save something into TARS — an external source (URL, file, pasted excerpt), the user's own words (a thought, note-to-self, running note), an agent-authored synthesis of session work, or the user's comment on something already captured. Trigger on "save this", "capture this", "add to tars/my brain", a bare URL/file drop meant for keeping, "note this down", "note to self", "jot this", "save the work to tars", "record what we did", "about PROJ-123: …", "note on that meeting/article". Routes by whose words it is; verbatim except for agent-authored work records.
 ---
 
 # Capture into TARS
@@ -9,7 +9,7 @@ description: Save something into TARS — an external source (URL, file, pasted 
 > and honor it — per-vault rules there (source allowlists, tone, privacy, output
 > layout) override this skill's defaults on conflict.
 
-Everything lands through `tars add`; the CLI owns storage, dedup, and
+Everything lands through `tars add` or `tars annotate`; the CLI owns storage, dedup, and
 provenance. Route by **whose words** it is — that decides the connector, and
 who authored it is load-bearing (never store your synthesis as the user's
 words, or their words as yours):
@@ -20,6 +20,7 @@ words, or their words as yours):
 | External text pasted from elsewhere (an excerpt, someone else's message) | pipe to `tars add - --title "<short title>"`, with `--origin "<source-url-or-ref>#<short-slug>"` when it has one — the URL keeps provenance, the slug keeps two excerpts of one source apart |
 | The user's own words — a thought, note-to-self, decision, running note | pipe **verbatim** to `tars add - --title "..."` (lands under the `note` connector); a living note they keep adding to → pin `--origin "note:<stable-slug>"`, and add to it later with `--append` |
 | A synthesis *you* authored — a work-log or decision record, kept at the user's request | `tars add - --connector agent --origin "agent:<stable-slug>" --title "..."`; a later session extends it with `--append` |
+| The user's comment **about something already captured** — a ticket, meeting, thread, article | pipe **verbatim** to `tars annotate <ref> -`, where `<ref>` is what the user called it (`PROJ-123`, a `[[wiki-link]]`, an origin) |
 | Files dropped in `inbox/` | `tars sweep`, then shelve what landed like any capture |
 
 Route rules:
@@ -49,6 +50,14 @@ Route rules:
   fails, by design. If `--append` reports no document at that origin, find
   the right slot (`tars list --connector note`) rather than adding
   `--create`, which is only for deliberately starting a new slot.
+- **Annotate, don't append, when the words are *about* a source.** Appending
+  to a synced capture (jira, gmail, granola, slack, web) is lost on its next
+  sync; an annotation is a note of its own that points at the source,
+  inherits its concepts, and is listed by `tars show <ref>`. Pass the user's
+  reference straight through — no search for an id first. If it names no
+  document or several, the error lists the candidates: ask which one, or
+  `tars search` for it. Retrying is safe (the same words on the same target
+  are one note).
 - Piped text needs `--title` (nothing to extract one from). For multi-line
   text, write a scratch file and pipe it — heredocs mangle special characters.
 
