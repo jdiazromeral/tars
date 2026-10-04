@@ -24,7 +24,9 @@ _ENTRY_RE = re.compile(r"^- \[\[([^\]|]+)(?:\|[^\]]*)?\]\]", re.M)
 
 
 def _entry_line(stem: str, title: str | None, origin: str) -> str:
-    return f"- [[{stem}|{title or origin}]]"
+    # A captured title is untrusted text: a newline in it used to land a "## …"
+    # heading outside the Sources section, which then grew on every regenerate.
+    return f"- [[{stem}|{store.link_label(title or origin)}]]"
 
 
 def regenerate(root: Path, db: sqlite3.Connection) -> tuple[int, int]:

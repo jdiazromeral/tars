@@ -524,8 +524,15 @@ def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
                             connector=row["connector"], origin=row["origin"], title=row["title"])
     for target in store.raw_files(root / row["raw_dir"]):
         target.unlink(missing_ok=True)
+    # Redaction must not leave the text readable in the database files: zero
+    # the freed pages, merge the FTS segments that still hold its tokens,
+    # rebuild the file, and empty the WAL.
+    db.execute("PRAGMA secure_delete = ON")
     with db:
         db.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+        db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('optimize')")
+    db.execute("VACUUM")
+    db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     return row
 
 
