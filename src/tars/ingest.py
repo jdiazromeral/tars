@@ -101,7 +101,7 @@ class NoSuchDocument(Exception):
 
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
-        append: bool = False, create: bool = False) -> tuple[str, str]:
+        append: bool = False, create: bool = False, retitle: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
 
     Adds never replace authored text: for a connector in AUTHORED_CONNECTORS,
@@ -148,15 +148,24 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         row = db.execute(
             "SELECT content_hash, raw_dir, concepts FROM documents WHERE id = ?", (doc.id,)
         ).fetchone()
-        # Decide against the raw file, never the index: the index only says where
-        # the file is, and it can be stale (a hand-edit) or missing (a lost tars.db).
-        stored_path = ((root / row["raw_dir"]) if row
-                       else store.find_raw(root, doc.connector, doc.id))
-        stored = store.read_raw(stored_path) if stored_path and stored_path.exists() else None
-        if append and stored is None and not create:
+        # Decide against the raw file, never the index: the index only helps
+        # find the file, and it can be stale (a hand rename/delete) or missing.
+        stored_path = _locate(root, doc, row, append=append)
+        stored = None
+        if stored_path is not None:
+            try:
+                stored = store.read_raw(stored_path)
+            except store.UnparseableRaw:
+                if append or doc.connector in AUTHORED_CONNECTORS or _addressed(doc):
+                    raise  # never write over words we can't read
+                # a synced snapshot: the re-sync repairs it, keeping the index's shelving
+                if row:
+                    doc.concepts = list(dict.fromkeys(
+                        json.loads(row["concepts"] or "[]") + doc.concepts))
+        if append and stored_path is None and not create:
             raise NoSuchDocument(f"no document at {doc.origin}")
         if stored is not None:
-            _merge_stored(doc, stored, append=append, rules=rules)
+            _merge_stored(doc, stored, append=append, rules=rules, retitle=retitle)
         digest = store.content_hash(doc.text)
 
         if stored is not None and _same(doc, stored):
@@ -164,12 +173,12 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
             raw_dir = str(stored_path.relative_to(root))
             if not (row and row["content_hash"] == digest and row["raw_dir"] == raw_dir
                     and json.loads(row["concepts"] or "[]") == doc.concepts):
-                index_doc(db, doc, digest, raw_dir)  # catch a stale index up; raw untouched
+                index_doc(db, stored, digest, raw_dir)  # catch a stale index up from raw
             db.commit()
             return doc.id, "unchanged"
 
         path = stored_path or store.raw_path_for(root, doc)
-        status = "updated" if (stored is not None or row) else "added"
+        status = "updated" if (stored_path is not None or row) else "added"
         ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
                                 connector=doc.connector, origin=doc.origin, title=doc.title)
         raw_path = store.write_raw(root, doc, path, source_bytes, source_ext)
@@ -186,21 +195,48 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
 _CONTENT_ADDRESSED = re.compile(r"^(note|file):[0-9a-f]{12}$")
 
 
+def _addressed(doc: RawDoc) -> bool:
+    return bool(_CONTENT_ADDRESSED.match(doc.origin))
+
+
+def _locate(root: Path, doc: RawDoc, row, *, append: bool) -> Path | None:
+    """This document's raw file, matched by the id inside it — never by trusting
+    the index blindly. The row's path counts only if that file still carries
+    this id (a hand rename or delete makes it stale). Without a usable row, a
+    new document checks only the path it would be written to; the connector-dir
+    scan runs only when it matters and is rare: a stale row, or an append with
+    no row (a lost tars.db)."""
+    if row:
+        path = root / row["raw_dir"]
+        if path.exists() and store.file_doc_id(path) == doc.id:
+            return path
+    if row or append:
+        return store.find_raw(root, doc.connector, doc.id)
+    candidate = store.raw_path_for(root, doc)
+    if candidate.exists() and store.file_doc_id(candidate) == doc.id:
+        return candidate
+    return None
+
+
 def _merge_stored(doc: RawDoc, stored: RawDoc, *, append: bool,
-                  rules: list[normalize.Rule]) -> None:
+                  rules: list[normalize.Rule], retitle: bool = False) -> None:
     """Fold the stored document (read from its raw file) into the incoming one.
 
     Shelving only grows (concepts union) and a title the caller doesn't restate
     is kept. An append joins the text and merges tags and meta. Authored text
     only grows: a re-add with different text raises WouldReplace, unless the
     origin is content-addressed (same origin, same words) or the difference is
-    only a vocab rule added since — then the stored words win. A synced source
-    replaces text, tags and meta: the source owns them.
+    only a vocab rule added since — then the stored words win. Tags, like
+    concepts, only grow. A synced source replaces its text and meta: the source
+    owns them. A content-addressed re-add keeps the stored provenance and title
+    (unless `retitle`: an explicit --title).
     """
     doc.concepts = list(dict.fromkeys(stored.concepts + doc.concepts))
-    addressed = bool(_CONTENT_ADDRESSED.match(doc.origin))
-    if doc.title is None or addressed:
-        doc.title = stored.title or doc.title  # a re-drop under a new filename isn't a rename
+    doc.tags = list(dict.fromkeys(stored.tags + doc.tags))  # labels only grow, like shelving
+    addressed = _addressed(doc)
+    if doc.title is None or (addressed and not retitle):
+        # a re-drop under a new filename isn't a rename; an explicit --title is
+        doc.title = stored.title or doc.title
     if append:
         # A retried append (the command ran, the caller never saw the output)
         # must not duplicate its lines; matching whole trailing lines keeps it
@@ -216,10 +252,11 @@ def _merge_stored(doc: RawDoc, stored: RawDoc, *, append: bool,
             if not (addressed or vocab_only):
                 raise WouldReplace(f"{doc.origin} already holds different text")
             doc.text = stored.text
-    if append or doc.connector in AUTHORED_CONNECTORS:
-        doc.tags = list(dict.fromkeys(stored.tags + doc.tags))
-        # the same capture re-dropped keeps its original provenance (inbox_file...)
-        doc.meta = {**doc.meta, **stored.meta} if addressed else {**stored.meta, **doc.meta}
+    if addressed:  # the same capture again keeps its provenance (path, inbox_file, date)
+        doc.meta = {**doc.meta, **stored.meta}
+        doc.captured_at = stored.captured_at
+    elif append or doc.connector in AUTHORED_CONNECTORS:
+        doc.meta = {**stored.meta, **doc.meta}
 
 
 def _same(doc: RawDoc, stored: RawDoc) -> bool:

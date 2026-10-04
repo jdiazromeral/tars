@@ -186,7 +186,7 @@ def render_body(doc: RawDoc) -> str:
     return f"{concepts_line(doc.concepts)}\n\n{doc.text}"
 
 
-def _file_doc_id(path: Path) -> str | None:
+def file_doc_id(path: Path) -> str | None:
     try:
         with path.open() as fh:
             for line in [next(fh, "") for _ in range(3)]:
@@ -201,7 +201,7 @@ def find_raw(root: Path, connector: str, doc_id: str) -> Path | None:
     """The raw file carrying DOC_ID, found by reading ids in its connector dir —
     for when the index has no row (a lost or not-yet-rebuilt tars.db)."""
     for path in sorted((root / RAW_DIR / slugify(connector)).glob("*.md")):
-        if _file_doc_id(path) == doc_id:
+        if file_doc_id(path) == doc_id:
             return path
     return None
 
@@ -214,7 +214,7 @@ def raw_path_for(root: Path, doc: RawDoc, existing: str | None = None) -> Path:
     conn_dir = root / RAW_DIR / slugify(doc.connector)
     base = slugify(doc.title) if doc.title else doc.id
     candidate = conn_dir / f"{base}.md"
-    if candidate.exists() and _file_doc_id(candidate) == doc.id:
+    if candidate.exists() and file_doc_id(candidate) == doc.id:
         return candidate  # this doc already owns the name
     # Collisions are checked across the whole vault, not just this connector
     # dir: a capture titled "Design Patterns" must not shadow the concept hub

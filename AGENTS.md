@@ -57,8 +57,9 @@ tars.db                           disposable index — tars reindex rebuilds it
   restate), or capture a new note. `--append` to an origin that holds nothing
   fails unless `--create` (track's first entry of the day). Only `tars
   normalize` may rewrite authored text, as a sanctioned vocab fix. Every
-  decision is made against the raw file, read under the write lock — the
-  index only locates it, and may be stale or missing. A content-addressed
+  decision is made against the raw file, read under the write lock and
+  matched by the id inside it — the index only helps find it, and may be
+  stale or missing. Tags, like concepts, only grow on a re-add. A content-addressed
   origin (`note:<hash>`, `file:<hash>`) *is* its text: re-adding it never
   changes the stored words, title or provenance.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
