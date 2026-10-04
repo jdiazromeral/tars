@@ -397,7 +397,11 @@ def sync(connector: str | None):
 @click.option("--commit", is_flag=True,
               help="Promote the pending watermark to live; "
                    "call only after a sweep ingests cleanly.")
-def cursor(connector: str, value: str | None, begin: bool, commit: bool):
+@click.option("--as", "form", type=click.Choice(syncstate.FORMS), default="iso",
+              show_default=True,
+              help="Print the watermark as the source reads it: epoch (Gmail after:, "
+                   "Slack oldest=) or jql (a date a day early, for updated >=).")
+def cursor(connector: str, value: str | None, begin: bool, commit: bool, form: str):
     """Read or advance the sync watermark for a connector (used by skill-fed syncs).
 
     Two-phase advance keeps the watermark safe by construction: `--begin` stamps
@@ -412,6 +416,8 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     """
     if sum((value is not None, begin, commit)) > 1:
         raise click.ClickException("choose exactly one of --set / --begin / --commit")
+    if form != "iso" and (value is not None or begin or commit):
+        raise click.ClickException("--as only formats a watermark being read")
     _, db = _open()
     if begin:
         click.echo(syncstate.begin(db, connector))
@@ -423,7 +429,7 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool):
     elif value is not None:
         syncstate.set_cursor(db, connector, value)
     elif current := syncstate.get_cursor(db, connector):
-        click.echo(current)
+        click.echo(syncstate.as_form(current, form))
 
 
 @main.command()
@@ -745,4 +751,5 @@ def slack_select(channel: str, channel_type: str):
         "selected": [vars(s) for s in report.selected],
         "skipped": report.skipped,
         "truncated": report.truncated,
+        "resume_from": report.resume_from,
     }, indent=2))
