@@ -26,7 +26,8 @@ the next. It is **not** the digest and must never behave like one:
   at 20:00; a watermark would make the second run show "nothing new." Re-running
   is safe and idempotent by design.
 - **It writes in two places only.** Step 1's sync (`sync-all`) captures and
-  shelves new documents, advances connector cursors, and labels synced Gmail
+  shelves new documents, creates concept and people pages, regenerates concept
+  hubs (`tars finalize`), advances connector cursors, and labels synced Gmail
   threads in the user's mailbox — say so when offering it, and skip it on
   request, which leaves this pass read-only. Then optional, additive task
   extraction (step 4, via the `tasks` skill), which never flips status or

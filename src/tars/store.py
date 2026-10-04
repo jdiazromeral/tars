@@ -174,12 +174,25 @@ TRACKING_PARAMS = re.compile(r"^(utm_\w+|gclid|fbclid|msclkid|mc_cid|mc_eid|igsh
 WIKI_LINK_RE = re.compile(r"\[\[([^\]|\\]+)(?:\\?\|[^\]]*)?\]\]")
 
 
-def link_label(text: str) -> str:
-    """Text made safe as a [[stem|label]] alias: one line (a newline would
-    start a heading or list item of its own), no brackets or pipes (they would
-    end or split the link). A title is a label, never markup."""
-    label = " ".join(text.split())
-    return label.replace("[", "(").replace("]", ")").replace("|", "/")
+def link_label(*texts: str | None) -> str:
+    """The first non-blank of `texts`, made safe as a [[stem|label]] alias: one
+    line (a newline would start a heading or list item of its own), no
+    brackets or pipes (they would end or split the link). A title is a label,
+    never markup; a blank one falls through to the next (e.g. the origin)."""
+    for text in texts:
+        label = " ".join((text or "").split())
+        if label:
+            return label.replace("[", "(").replace("]", ")").replace("|", "/")
+    return ""
+
+
+def stem_owner(root: Path, stem: str) -> Path | None:
+    """The file that already owns `stem` in the flat [[wiki-link]] namespace,
+    compared the way the disk compares names (APFS: case- and
+    normalization-insensitive), or None."""
+    key = unicodedata.normalize("NFC", stem).casefold()
+    return next((f for f in linkable_files(root)
+                 if unicodedata.normalize("NFC", f.stem).casefold() == key), None)
 
 
 def stem_of(raw_dir: str) -> str:
