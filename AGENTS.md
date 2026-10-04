@@ -56,7 +56,13 @@ tars.db                           disposable index — tars reindex rebuilds it
   add to it with `--append` (which keeps the title and tags it doesn't
   restate), or capture a new note. `--append` to an origin that holds nothing
   fails unless `--create` (track's first entry of the day). Only `tars
-  normalize` may rewrite authored text, as a sanctioned vocab fix. Every
+  normalize` may rewrite authored text, as a sanctioned vocab fix.
+- **Annotations never touch their target.** The user's words *about* a
+  captured document (`tars annotate <ref> <text|->`) are a `note` of their own
+  with `meta.annotates: <target id>`, inheriting the target's concepts. A
+  re-sync of the target can't lose them; `tars show` lists them under it, a
+  search hit on one is marked `↳ on [[target]]`, and `tars rm` of the target
+  warns and keeps them (they are the user's words). Every
   decision is made against the raw file, read under the write lock and
   matched by the id inside it — the index only helps find it, and may be
   stale or missing. Tags, like concepts, only grow on a re-add. A content-addressed
@@ -217,8 +223,8 @@ properties — keep them straight:
 - CLI usage: `tars add <url|file|->`, `tars add - --append [--create]`
   (`--append` adds stdin text to the end of the existing document for
   `--origin`, read and write under one DB lock; fails if none exists unless
-  `--create`), `tars sweep`, `tars tag|untag <ref>
-  --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
+  `--create`), `tars sweep`, `tars annotate <ref> <text|-> [--concept ...]`,
+  `tars tag|untag <ref> --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
   `tars show <ref> [--path | --head N | --grep <regex> [-C N]]` (token-frugal
   slices; a full show on a transcript can be ~30k tokens),

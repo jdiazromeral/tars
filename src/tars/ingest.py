@@ -417,6 +417,35 @@ def index_doc(db: sqlite3.Connection, doc: RawDoc, digest: str, raw_dir: str) ->
     )
 
 
+def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
+             title: str | None = None, concepts: Sequence[str] = ()) -> tuple[str, str]:
+    """Record the user's words about `target` (a `find_doc` row) as a note of
+    their own: `meta.annotates` holds the target's id and the note inherits its
+    concepts, so it shelves into the same hubs. The target is never touched, so
+    a re-sync of it can't lose the annotation. The origin hashes target and
+    text together: the same words twice on one target are one note (a retried
+    command is a no-op), on two targets two notes. Returns (doc_id, status).
+    """
+    shelved = json.loads(target["concepts"] or "[]")
+    doc = RawDoc(
+        connector="note",
+        origin=note_origin(f"{target['id']}\n{text}"),
+        text=text,
+        title=title or f"On {target['title'] or target['origin']}",
+        concepts=list(dict.fromkeys([*shelved, *(store.slugify(c) for c in concepts)])),
+        meta={"annotates": target["id"]},
+    )
+    return add(root, db, doc)
+
+
+def annotations_of(db: sqlite3.Connection, doc_id: str) -> list[sqlite3.Row]:
+    """The annotations that point at `doc_id`, oldest first."""
+    return db.execute(
+        "SELECT id, title, captured_at, raw_dir FROM documents "
+        "WHERE json_extract(meta, '$.annotates') = ? ORDER BY captured_at, id",
+        (doc_id,)).fetchall()
+
+
 def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
     """Delete a capture everywhere — raw file, source sidecar, index row —
     logging the deletion first (see `ingestlog`). Returns the removed

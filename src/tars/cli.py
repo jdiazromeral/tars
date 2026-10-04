@@ -128,6 +128,45 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
     click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc.origin}")
 
 
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
+@click.argument("text")
+@click.option("--title", help="Title for the annotation (default: 'On <target title>').")
+@click.option("--concept", "concepts", multiple=True,
+              help="Concept slug(s) beyond the ones inherited from the target; repeatable.")
+def annotate(ref: str, text: str, title: str | None, concepts: tuple[str, ...]):
+    """Add your note about an already-captured document, without touching it.
+
+    TEXT is the note, or '-' to read it from stdin (multi-line, no quoting).
+    It is saved as a note of its own that points at REF and inherits its
+    concepts: a re-sync of a ticket or thread can't lose it, and `tars show
+    REF` lists it under the document. The same words twice are one note.
+    """
+    words = (click.get_text_stream("stdin").read() if text == "-" else text).strip()
+    if not words:
+        raise click.ClickException("nothing to annotate — TEXT is empty")
+    root, db = _open()
+    target = _doc_row(db, ref)
+    try:
+        doc_id, status = ingest.annotate(root, db, target, words, title, concepts)
+    except store.UnparseableRaw as exc:
+        raise click.ClickException(f"{exc} — repair it before annotating again")
+    stem = Path(target["raw_dir"]).stem
+    click.echo(f"{status}  {doc_id}  on [[{stem}]]  {target['title'] or target['origin']}")
+
+
+def _annotation_lines(root: Path, db, doc_id: str) -> list[str]:
+    """One line per annotation of DOC_ID: date, id, the note's first line."""
+    lines = []
+    for row in ingest.annotations_of(db, doc_id):
+        try:
+            first = store.read_raw(root / row["raw_dir"]).text.partition("\n")[0]
+        except store.UnparseableRaw:
+            first = f"({row['raw_dir']} is unparseable)"
+        lines.append(f"{row['captured_at'][:10]}  {row['id']}  {first}")
+    return lines
+
+
 def _try(fn):
     try:
         return fn()
@@ -169,6 +208,8 @@ def search(query: str, limit: int, connector: str | None, raw_match: bool,
         click.echo(f"{hit.doc_id}  [[{hit.file}]]  [{hit.connector}] {hit.title or hit.origin}")
         click.echo(f"    {hit.snippet}")
         click.echo(f"    ({hit.origin})")
+        if hit.annotates:
+            click.echo(f"    ↳ on [[{hit.annotates}]]")
         if hit.chunk:
             for line in hit.chunk.splitlines():
                 click.echo(f"    | {line}")
@@ -205,10 +246,16 @@ def show(ref: str, path_only: bool, head: int | None, pattern: str | None, conte
             click.echo(view.grep(text, pattern, context))
         except re.error as exc:
             raise click.ClickException(f"bad --grep pattern: {exc}")
-    elif head is not None:
-        click.echo(view.head(text, head))
     else:
-        click.echo(text)
+        body = view.head(text, head) if head is not None else text
+        click.echo(body)
+        notes = _annotation_lines(root, db, row["id"])
+        if notes:
+            if not body.endswith("\n"):
+                click.echo()  # one blank line before the section, whatever the body ends with
+            click.echo(f"── annotations ({len(notes)}) — `tars show <id>` for one in full ──")
+            for line in notes:
+                click.echo(line)
 
 
 @main.command(name="list")
@@ -543,8 +590,11 @@ def rm(ref: str, yes: bool):
     if not yes:
         names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
         click.confirm(f"delete {names} and its index entry?", abort=True)
+    annotations = ingest.annotations_of(db, doc_id)
     removed = ingest.remove(root, db, doc_id)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
+    for note in annotations:  # the user's own words: kept, never cascaded
+        click.echo(f"  annotation {note['id']} still points at it (kept; `tars rm` it if unwanted)")
     for linker in doctor_mod.references_to(root, raw_path.stem):
         click.echo(f"  still referenced in {linker}")
 
