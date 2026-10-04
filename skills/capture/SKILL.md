@@ -20,7 +20,7 @@ words, or their words as yours):
 | External text pasted from elsewhere (an excerpt, someone else's message) | pipe to `tars add - --title "<short title>"`, with `--origin "<source-url-or-ref>#<short-slug>"` when it has one — the URL keeps provenance, the slug keeps two excerpts of one source apart |
 | The user's own words — a thought, note-to-self, decision, running note | pipe **verbatim** to `tars add - --title "..."` (lands under the `note` connector); a living note they keep adding to → pin `--origin "note:<stable-slug>"`, and add to it later with `--append` |
 | A synthesis *you* authored — a work-log or decision record, kept at the user's request | `tars add - --connector agent --origin "agent:<stable-slug>" --title "..."`; a later session extends it with `--append` |
-| The user's comment **about something already captured** — a ticket, meeting, thread, article | pipe **verbatim** to `tars annotate <ref> -`, where `<ref>` is what the user called it (`PROJ-123`, a `[[wiki-link]]`, an origin) |
+| The user's comment **about something already captured** — a ticket, meeting, thread, article | pipe **verbatim** to `tars annotate <ref> -` (stdin also keeps words starting with `-` safe), where `<ref>` is what the user called it (`PROJ-123`, a `[[wiki-link]]`, an origin) |
 | Files dropped in `inbox/` | `tars sweep`, then shelve what landed like any capture |
 
 Route rules:
@@ -53,7 +53,7 @@ Route rules:
 - **Annotate, don't append, when the words are *about* a source.** Appending
   to a synced capture (jira, gmail, granola, slack, web) is lost on its next
   sync; an annotation is a note of its own that points at the source,
-  inherits its concepts, and is listed by `tars show <ref>`. Pass the user's
+  inherits its concepts, and is listed by `tars show <ref> --annotations`. Pass the user's
   reference straight through — no search for an id first. If it names no
   document or several, the error lists the candidates: ask which one, or
   `tars search` for it. Retrying is safe (the same words on the same target

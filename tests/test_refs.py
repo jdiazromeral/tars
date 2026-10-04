@@ -49,12 +49,12 @@ def test_every_form_of_reference_finds_the_document(root, ref):
     ["tag", "{ref}", "--concept", "auth"],
     ["untag", "{ref}", "--concept", "auth"],
     ["promote", "{ref}", "--title", "Why OIDC"],
-    ["rm", "{ref}", "--yes"],
+    ["rm", "{ref}"],  # a loose ref is confirmed at the prompt (rm --yes wants an exact one)
 ])
 def test_every_document_command_takes_a_reference(root, command):
     _, runner = root
     _ticket(runner)
-    result = runner.invoke(main, [a.format(ref="PROJ-123") for a in command])
+    result = runner.invoke(main, [a.format(ref="PROJ-123") for a in command], input="y\n")
     assert result.exit_code == 0, result.output
 
 
@@ -107,7 +107,7 @@ def test_a_key_that_is_also_a_file_name_is_a_tie_not_a_guess(root):
     ticket = _ticket(runner)
     note = runner.invoke(main, ["add", "-", "--title", "PROJ-123"],
                          input="my note").output.split()[1]
-    result = runner.invoke(main, ["rm", "PROJ-123", "--yes"])
+    result = runner.invoke(main, ["rm", "PROJ-123"], input="y\n")
     assert result.exit_code != 0
     assert ticket in result.output and note in result.output
 
@@ -140,6 +140,55 @@ def test_file_names_match_case_insensitively_and_with_escaped_pipes(root, ref):
     doc = runner.invoke(main, ["add", "-", "--title", "plan"], input="the plan").output.split()[1]
     (path / "raw/note/plan.md").rename(path / "raw/note/My Plan.md")
     runner.invoke(main, ["reindex"])
+    result = runner.invoke(main, ["show", ref, "--head", "2"])
+    assert result.exit_code == 0, result.output
+    assert f"id: {doc}" in result.output
+
+
+# --- second review of #13 ---
+
+def test_a_path_or_url_is_never_cut_down_to_a_file_name(root):
+    _, runner = root
+    runner.invoke(main, ["add", "-", "--title", "README"], input="my readme notes")
+    for ref in ("https://github.com/x/y/blob/main/README.md", "raw/jira/readme.md"):
+        result = runner.invoke(main, ["show", ref])
+        assert result.exit_code != 0, (ref, result.output)
+        assert "no document matches" in result.output
+
+
+def test_a_raw_path_is_an_exact_reference(root):
+    _, runner = root
+    doc = runner.invoke(main, ["add", "-", "--title", "README"], input="x").output.split()[1]
+    result = runner.invoke(main, ["rm", "raw/note/readme.md", "--yes"])
+    assert result.exit_code == 0, result.output
+    assert doc in result.output
+
+
+def test_rm_yes_refuses_a_loose_reference(root):
+    # The ticket was never synced; "PROJ-123" uniquely matches the user's own
+    # note by name. Deleting without a prompt on a guess is what --yes forbids.
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--title", "PROJ-123"], input="my note")
+    result = runner.invoke(main, ["rm", "PROJ-123", "--yes"])
+    assert result.exit_code != 0
+    assert "exact reference" in result.output
+    assert (path / "raw/note/proj-123.md").exists()
+
+
+def test_rm_without_yes_names_what_a_loose_reference_resolved_to(root):
+    path, runner = root
+    runner.invoke(main, ["add", "-", "--title", "PROJ-123"], input="my note")
+    result = runner.invoke(main, ["rm", "PROJ-123"], input="n\n")
+    assert "[note]" in result.output and "PROJ-123" in result.output
+    assert (path / "raw/note/proj-123.md").exists()
+
+
+@pytest.mark.parametrize("ref", ["[[reunión-semanal#Acuerdos]]", "[[reunión-semanal#^abc123]]",
+                                 "[[REUNIÓN-SEMANAL]]", "Reunión-Semanal"])
+def test_heading_links_and_non_ascii_case(root, ref):
+    _, runner = root
+    doc = runner.invoke(main, ["add", "-", "--title", "Reunión semanal"],
+                        input="acta").output.split()[1]
     result = runner.invoke(main, ["show", ref, "--head", "2"])
     assert result.exit_code == 0, result.output
     assert f"id: {doc}" in result.output

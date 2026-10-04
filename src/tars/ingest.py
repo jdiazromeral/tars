@@ -112,35 +112,36 @@ class AmbiguousRef(LookupError):
 _DOC_COLUMNS = "id, connector, origin, title, raw_dir, concepts"
 
 
-def find_doc(db: sqlite3.Connection, ref: str) -> sqlite3.Row:
+def find_doc(db: sqlite3.Connection, ref: str, *, loose: bool = True) -> sqlite3.Row:
     """The one document a reference names, as an index row.
 
-    Precise forms first, each stopping at its match: the id, then the origin
-    (`jira:PROJ-123`; a URL is canonicalized as `web` origins are). Then the
-    two loose forms *together*, so a tie between them is never settled
-    silently: the raw file name — bare, as a `[[wiki-link|alias]]` (escaped
-    pipe too), or as a `raw/…/<name>.md` path — and the source's own key
-    (`PROJ-123`, `owner/repo#13`: the origin after its scheme). Loose forms
-    match case-insensitively. No match raises NoSuchDocument; more than one
-    match within a step raises AmbiguousRef.
+    Exact forms first, each stopping at its match: the id; the origin
+    (`jira:PROJ-123`; a URL is canonicalized as `web` origins are); the raw
+    file's path (`raw/jira/proj-123.md`). Then, unless `loose=False`, the two
+    loose forms *together*, so a tie between them is never settled silently:
+    the file name — bare or as a `[[wiki-link#heading|alias]]` — and the
+    source's own key (`PROJ-123`, `owner/repo#13`: the origin after its
+    scheme), both case-insensitive. A path or URL is never cut down to a file
+    name. No match raises NoSuchDocument; several in one step, AmbiguousRef.
     """
     ref = ref.strip()
     origins = {ref}
     if ref.lower().startswith(("http://", "https://")):
         origins.add(store.canonical_url(ref))
-    precise = [("id = ?", (ref,)),
-               (f"origin IN ({', '.join('?' * len(origins))})", tuple(origins))]
-
-    link = store.WIKI_LINK_RE.fullmatch(ref)
-    name = link.group(1).strip() if link else ref
-    if not link and (name.endswith(".md") or name.startswith("raw/")):
-        name = store.stem_of(name)
-    loose = ("lower(substr(raw_dir, length(raw_dir) - length(?1) - 3)) = lower('/' || ?1 || '.md') "
-             "OR (instr(origin, ':') > 0 "
-             "AND lower(substr(origin, instr(origin, ':') + 1)) = lower(?2))",
-             (name, ref))
-
-    for condition, params in [*precise, loose]:
+    steps = [("id = ?", (ref,)),
+             (f"origin IN ({', '.join('?' * len(origins))})", tuple(origins)),
+             ("raw_dir = ?", (ref,))]
+    if loose:
+        link = store.WIKI_LINK_RE.fullmatch(ref)
+        # a link's #heading / #^block names a spot inside the file, not the file
+        name = link.group(1).split("#", 1)[0].strip() if link else ref.removesuffix(".md")
+        # folded in Python: SQLite's lower() only folds ASCII (Reunión, Ó)
+        steps.append(("lower(substr(raw_dir, length(raw_dir) - length(?1) - 3)) = "
+                      "'/' || ?1 || '.md' "
+                      "OR (instr(origin, ':') > 0 "
+                      "AND lower(substr(origin, instr(origin, ':') + 1)) = ?2)",
+                      (name.lower(), ref.lower())))
+    for condition, params in steps:
         rows = db.execute(f"SELECT {_DOC_COLUMNS} FROM documents WHERE {condition} "
                           "ORDER BY connector, origin", params).fetchall()
         if len(rows) == 1:
