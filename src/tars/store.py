@@ -173,13 +173,17 @@ def canonical_url(url: str) -> str:
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
 
 
+def concepts_line(concepts: list[str]) -> str:
+    """The derived shelving line, exactly as `render_body` writes it."""
+    return "Concepts: " + " ".join(f"[[{slug}]]" for slug in concepts)
+
+
 def render_body(doc: RawDoc) -> str:
     """The body as written to disk and indexed: a derived `Concepts:` wiki-link
     line (when shelved) above the verbatim text."""
     if not doc.concepts:
         return doc.text
-    links = " ".join(f"[[{slug}]]" for slug in doc.concepts)
-    return f"Concepts: {links}\n\n{doc.text}"
+    return f"{concepts_line(doc.concepts)}\n\n{doc.text}"
 
 
 def _file_doc_id(path: Path) -> str | None:
@@ -252,28 +256,68 @@ def raw_files(content_md: Path) -> list[Path]:
     return sorted(content_md.parent.glob(f"{content_md.stem}.*"))
 
 
+class UnparseableRaw(ValueError):
+    """A raw file that can't be read back as a document: unreadable, not UTF-8,
+    or frontmatter that is missing, invalid YAML, or the wrong shape. The one
+    error every reader catches to skip and name a bad file instead of crashing."""
+
+    def __init__(self, path: Path, reason: str):
+        super().__init__(f"{path}: {reason}")
+        self.path = path
+        self.reason = reason
+
+
+def _is_str_list(value) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _frontmatter_problem(fm) -> str | None:
+    """Why this frontmatter can't become a RawDoc, or None. Checks values, not
+    just keys: a `connector: null` would otherwise get as far as the DB."""
+    if not isinstance(fm, dict):
+        return "frontmatter is not a mapping"
+    for key in ("connector", "origin"):
+        if not isinstance(fm.get(key), str) or not fm[key]:
+            return f"`{key}` must be a non-empty string"
+    if fm.get("title") is not None and not isinstance(fm["title"], str):
+        return "`title` must be a string"
+    for key in ("tags", "concepts"):
+        if fm.get(key) is not None and not _is_str_list(fm[key]):
+            return f"`{key}` must be a list of strings"
+    if fm.get("meta") is not None and not isinstance(fm["meta"], dict):
+        return "`meta` must be a mapping"
+    if fm.get("captured_at") is not None and not isinstance(fm["captured_at"], (str, datetime)):
+        return "`captured_at` must be a timestamp"
+    return None
+
+
 def read_raw(content_md: Path) -> RawDoc:
-    raw = content_md.read_text()
+    try:
+        raw = content_md.read_text()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise UnparseableRaw(content_md, f"unreadable ({type(exc).__name__})") from exc
     if not raw.startswith("---\n"):
-        raise ValueError(f"{content_md}: missing frontmatter")
+        raise UnparseableRaw(content_md, "missing frontmatter")
     header, _, body = raw[4:].partition("\n---\n")
-    # Every way a file can fail to parse surfaces as ValueError (UnicodeDecodeError
-    # is one too), so readers can skip and name a bad file instead of crashing.
     try:
         fm = yaml.safe_load(header)
     except yaml.YAMLError as exc:
-        raise ValueError(f"{content_md}: frontmatter is not valid YAML") from exc
-    if not isinstance(fm, dict) or not {"connector", "origin"} <= fm.keys():
-        raise ValueError(f"{content_md}: frontmatter lacks connector/origin")
+        raise UnparseableRaw(content_md, "frontmatter is not valid YAML") from exc
+    problem = _frontmatter_problem(fm)
+    if problem:
+        raise UnparseableRaw(content_md, problem)
     text = body.strip("\n")
 
     # The Concepts: line is a derived rendering — strip it back out of the body.
-    # v2 writes it only for a shelved doc, so an unshelved doc's text that merely
-    # starts with "Concepts: " is the user's content and must survive the read.
-    # v1 (no `concepts` key) always gets the old strip; migrate depends on it.
+    # v2: only its exact rendering of the frontmatter concepts is derived; any
+    # other first line (an unshelved note that starts "Concepts: ...") is content.
+    # v1 (no `concepts` key): the body line held the concepts; migrate reads it.
     line_concepts: list[str] = []
-    derived_line = bool(fm.get("concepts")) or "concepts" not in fm
-    if derived_line and text.startswith("Concepts: "):
+    if "concepts" in fm:
+        first, _, rest = text.partition("\n")
+        if fm["concepts"] and first == concepts_line(fm["concepts"]):
+            text = rest.lstrip("\n")
+    elif text.startswith("Concepts: "):
         first, _, rest = text.partition("\n")
         line_concepts = re.findall(r"\[\[([^\]|]+)\]\]", first)
         text = rest.lstrip("\n")

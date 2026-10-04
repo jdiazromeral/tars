@@ -87,8 +87,11 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
         concepts=[store.slugify(c) for c in concepts],
         meta=extracted.meta,
     )
-    doc_id, status = ingest.add(root, db, doc, extracted.source_bytes, extracted.source_ext,
-                                append=append)
+    try:
+        doc_id, status = ingest.add(root, db, doc, extracted.source_bytes,
+                                    extracted.source_ext, append=append)
+    except store.UnparseableRaw as exc:  # appending to a doc whose raw file is broken
+        raise click.ClickException(f"{exc} — repair it before writing to this document")
     click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc.origin}")
 
 
@@ -333,13 +336,14 @@ def reindex():
     _exit_if_unparseable(root, unparseable)
 
 
-def _exit_if_unparseable(root: Path, unparseable: list[tuple[Path, str]]) -> None:
-    """Name every raw file a rebuild had to skip, then exit non-zero."""
+def _exit_if_unparseable(root: Path, unparseable: list[tuple[Path, str]],
+                         rerun: str = "tars reindex") -> None:
+    """Name every raw file a pass had to skip, then exit non-zero."""
     if not unparseable:
         return
     for path, reason in unparseable:
-        click.echo(f"  unparseable  {path.relative_to(root)}  {reason} — not indexed")
-    click.echo(f"{len(unparseable)} raw file(s) skipped; fix or remove them and reindex")
+        click.echo(f"  unparseable  {path.relative_to(root)}  {reason} — skipped")
+    click.echo(f"{len(unparseable)} raw file(s) skipped; repair them and re-run `{rerun}`")
     sys.exit(1)
 
 
@@ -365,11 +369,18 @@ def migrate():
             f"vault is v{found}, newer than this tool — upgrade the tool instead"
         )
     db = database.connect(root)
-    rewritten = 0
+    rewritten, unparseable = 0, []
     for content_md in store.iter_raw(root):
-        doc = store.read_raw(content_md)  # v1-compat parse pulls concepts out of the body
+        try:
+            doc = store.read_raw(content_md)  # v1-compat parse pulls concepts out of the body
+        except store.UnparseableRaw as exc:
+            unparseable.append((content_md, exc.reason))
+            continue
         store.write_raw(root, doc, content_md)
         rewritten += 1
+    if unparseable:  # the marker stays at the old version until every file is migrated
+        click.echo(f"rewrote {rewritten} raw files; vault left at v{found}")
+        _exit_if_unparseable(root, unparseable, rerun="tars migrate")
     (root / store.MARKER).write_text(f"version: {store.SCHEMA_VERSION}\n")
     count, unparseable = ingest.reindex(root, db)
     click.echo(f"migrated vault at {root} to v{store.SCHEMA_VERSION}: "

@@ -113,11 +113,10 @@ def db_drift(root: Path, db: sqlite3.Connection) -> list[Finding]:
         rel = str(content_md.relative_to(root))
         try:
             doc = store.read_raw(content_md)
-        except ValueError as exc:
+        except store.UnparseableRaw as exc:
             unparseable.add(rel)
-            reason = str(exc).removeprefix(f"{content_md}: ")
             findings.append(Finding("unparseable-raw", rel,
-                                    f"{reason} — repair it by hand or restore it from git"))
+                                    f"{exc.reason} — repair it by hand or restore it from git"))
             continue
         raw_docs[doc.id] = (content_md, doc)
 
