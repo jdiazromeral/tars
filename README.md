@@ -125,7 +125,7 @@ tars add https://example.com/article
 tars add ~/Downloads/paper.pdf
 echo "decision: we keep snowflake exports weekly" | tars add -
 tars search "snowflake exports" -v   # -v includes each hit's matching chunk
-tars show <doc_id> --head 20         # frontmatter + opening; --grep for slices
+tars show PROJ-123 --head 20        # id, origin, file name or key; --grep for slices
 tars status
 ```
 
@@ -203,7 +203,7 @@ that decides if/when a semantic-search layer earns its complexity.
 
 **3. Promote rarely, deliberately.** When an answer surfaces something durable
 — a decision, a rationale, a concept — say *"promote that"*. The agent runs
-`tars promote <doc_id> --title "..."`, distills a few sentences into the
+`tars promote <ref> --title "..."`, distills a few sentences into the
 created note, and links related notes with `[[wiki-links]]`. `wiki/notes/` is the
 only curated surface: keep it small enough that every note earns its place.
 
@@ -311,7 +311,7 @@ every digest entry, task, and note that came out of it; open a note and
   `reindex` (only when it detects drift) → `hubs` → `doctor`. Every connector
   sync closes with it; run it by hand after any change and it re-checks
   invariants, exiting non-zero if something's still off.
-- `tars rm <doc_id>` — the redaction path: deletes a capture everywhere (raw
+- `tars rm <ref>` — the redaction path: deletes a capture everywhere (raw
   file, sidecar, index) and reports any wiki-links still pointing at it.
 - `tars backup [dir] [--keep N]` — writes a full git bundle of the vault to
   `dir` (or `$TARS_BACKUP_DIR` when omitted; `--keep` prunes to the newest N);

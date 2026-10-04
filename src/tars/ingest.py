@@ -96,7 +96,57 @@ class WouldReplace(Exception):
 
 
 class NoSuchDocument(Exception):
-    """`append` without `create` named a slot that holds no document."""
+    """No document matches: an append slot that holds nothing, or a reference
+    (see `find_doc`) that names no document."""
+
+
+class AmbiguousRef(LookupError):
+    """A reference matched more than one document; `candidates` are their rows."""
+
+    def __init__(self, ref: str, candidates: list[sqlite3.Row]):
+        super().__init__(ref)
+        self.ref = ref
+        self.candidates = candidates
+
+
+_DOC_COLUMNS = "id, connector, origin, title, raw_dir, concepts"
+
+
+def find_doc(db: sqlite3.Connection, ref: str) -> sqlite3.Row:
+    """The one document a reference names, as an index row.
+
+    A reference is whatever a person or agent has at hand, tried in order and
+    stopping at the first tier that matches: the id, the origin
+    (`jira:PROJ-123`), the raw file name — the wiki-link Obsidian shows, with or
+    without `[[…|alias]]`, `.md` or its `raw/…` path — and finally the source's
+    own key (`PROJ-123`, the origin after its scheme; case-insensitive). Every
+    match is exact, never fuzzy: no match raises NoSuchDocument, more than one
+    within a tier raises AmbiguousRef.
+    """
+    ref = ref.strip()
+    stem = ref
+    if stem.startswith("[[") and stem.endswith("]]"):
+        stem = stem[2:-2]
+    stem = stem.split("|", 1)[0].split("#", 1)[0].removesuffix(".md").rsplit("/", 1)[-1]
+    tiers = [
+        ("id = ?", ref),
+        ("origin = ?", ref),
+        # raw_dir ends in "/<stem>.md"; compared by suffix, not LIKE (no wildcards)
+        ("substr(raw_dir, length(raw_dir) - length(?1) - 3) = '/' || ?1 || '.md'",
+         stem.lower()),
+        ("instr(origin, ':') > 0 AND lower(substr(origin, instr(origin, ':') + 1)) = lower(?)",
+         ref),
+    ]
+    for condition, value in tiers:
+        if not value:
+            continue
+        rows = db.execute(f"SELECT {_DOC_COLUMNS} FROM documents WHERE {condition} "
+                          "ORDER BY connector, origin", (value,)).fetchall()
+        if len(rows) == 1:
+            return rows[0]
+        if rows:
+            raise AmbiguousRef(ref, rows)
+    raise NoSuchDocument(ref)
 
 
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
