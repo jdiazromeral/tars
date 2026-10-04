@@ -129,10 +129,14 @@ annotations (new notes that point at it), never edits to it.
   the skill never mentions `--append`; same-slot re-adds replace silently.
   Fixed: authored text (note/agent/activity) only grows — a re-add with
   different text is refused; capture appends and slots excerpts by `<url>#<slug>`.
-- [ ] **D. Sync windows that lose items** — `sync-granola` advances with
+- [x] **D. Sync windows that lose items** — `sync-granola` advances with
   `--set` even after skipping meetings; the Slack cap keeps the newest
   threads so a backlog never reaches the oldest. Plausible: ISO watermarks
-  passed unconverted to JQL / Gmail `after:` / Slack `oldest=`.
+  passed unconverted to JQL / Gmail `after:` / Slack `oldest=`. Fixed:
+  granola brackets with `--begin`/`--commit` and commits only when nothing
+  was skipped; Slack selects oldest-first and a capped run resumes at its
+  last thread (`resume_from`); `tars cursor --as epoch|jql` hands each
+  source its own form, erring a day early for JQL.
 - [x] **E. Re-add drops metadata** — `--append` without `--title` nulls the
   title and wipes tags; a title-only change reports `unchanged`; `--append`
   to a missing slot silently creates a doc. Fixed: `add` decides against the
@@ -156,9 +160,11 @@ annotations (new notes that point at it), never edits to it.
   read-only but runs `sync-all` (which labels Gmail); `gardener` leaves raw
   person links dangling and never finalizes; `digest`/`tasks` disagree on
   the task format; no skill says captured text is data, not instructions.
-- [ ] **Usability: commands only accept a doc id.** `show`/`tag`/`untag`/`rm`/
+- [x] **Usability: commands only accept a doc id.** `show`/`tag`/`untag`/`rm`/
   `promote` (and the planned `annotate`) should take an id, an origin
-  (`jira:PROJ-123`) or a file stem / `[[stem]]`, exact match only.
+  (`jira:PROJ-123`) or a file stem / `[[stem]]`, exact match only. Done in
+  #13 (`ingest.find_doc`), with `tars annotate` for the user's words about a
+  capture; #14 made annotations visible in Obsidian's backlinks.
 - Low priority, noted: no fsync before rename; hubs written non-atomically;
   one pending-cursor slot shared by overlapping sweeps; URL variants (`/a` vs
   `/a/`, `:443`, query order) mint duplicates; a lost tars.db plus a

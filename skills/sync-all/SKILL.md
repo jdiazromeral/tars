@@ -44,9 +44,10 @@ code-connector scope (orgs / repos / authors).
    - **A connector whose MCP isn't authorized** (the claude.ai Gmail / Granola
      connectors can be absent in headless or cron runs) → skip it, note it, and
      keep going. Never fail the whole pass because one source is unavailable.
-   - Each connector's own two-phase cursor (`--begin` / `--commit`) still guards
-     its watermark, so a connector that errors leaves its cursor uncommitted and
-     the others are unaffected.
+   - Each connector guards its own watermark — gmail, jira and granola with
+     the two-phase `--begin` / `--commit`, github inside `tars sync` itself —
+     so a connector that errors or skips items leaves its cursor where it
+     was, and the others are unaffected.
 
 3. **Finalize once** — after every connector finishes, run `tars finalize`
    (regenerate hubs, clear any index drift, re-check invariants). Each sync

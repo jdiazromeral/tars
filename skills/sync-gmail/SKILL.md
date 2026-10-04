@@ -56,7 +56,8 @@ future incremental sweeps — the two-phase advance makes that impossible.
    output as an id list to fan out over, not as content. Paginate until
    exhausted — do not silently cap.
    - Incremental: query `in:inbox -category:promotions -category:social`
-     plus `after:<watermark>`.
+     plus `after:<epoch>`, where `<epoch>` is `tars cursor gmail --as epoch`
+     (Gmail reads `after:` as a date or Unix seconds, not an ISO timestamp).
    - Concrete threads: the named thread ids, or the user's given
      `search_threads` query verbatim (may include Trash/Spam/any label since
      the user named it explicitly).

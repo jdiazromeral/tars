@@ -15,6 +15,8 @@ and never write into raw/ directly.
 
 1. **Read the watermark**: `tars cursor granola` — an ISO timestamp, empty on
    first run. On first run, ask the user how far back to go (default: 30 days).
+   Then, **before listing**, stamp the sweep start: `tars cursor granola
+   --begin` (the CLI records `now()` in a pending slot).
 2. **List meetings** since the watermark with the Granola MCP tools (load them
    via ToolSearch if deferred: `list_meetings` / `get_meetings`). Paginate
    until exhausted — do not silently cap.
@@ -69,9 +71,14 @@ and never write into raw/ directly.
    and report what changed. Never correct raw text any other way, and never
    add an entry unapproved. Skip generic words that could appear legitimately
    (that's exactly what connector scoping protects, but don't lean on it).
-5. **Advance the watermark** to the newest meeting's start time:
-   `tars cursor granola --set "<ISO timestamp>"`.
-6. **Report**: counts of added / updated / unchanged, the new watermark,
+5. **Commit the watermark only if no meeting was skipped**: `tars cursor
+   granola --commit`. A meeting skipped for an empty transcript (still being
+   processed) or an MCP error must be fetched again next run, and a committed
+   watermark would put it out of reach for good — so any skip leaves the
+   cursor uncommitted, and the next run re-lists the window (meetings already
+   stored come back `unchanged`). Never `--set` it to a meeting's start time.
+6. **Report**: counts of added / updated / unchanged, the new watermark (or
+   **"uncommitted"** and which meetings caused it),
    concepts created vs reused, vocab entries proposed/added, and any meetings
    skipped because the transcript was empty or the MCP errored — name them
    explicitly so nothing is silently dropped.

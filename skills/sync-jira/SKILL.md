@@ -60,7 +60,10 @@ will not be refreshed by it — use the Refresh mode to bring them current.
      first run — then ask how far back to go, default 30 days). Then, **before
      fetching**, stamp the sweep start: `tars cursor jira --begin` (the CLI
      records `now()` in a pending slot). JQL:
-     `assignee = currentUser() AND updated >= "<watermark>" ORDER BY updated ASC`.
+     `assignee = currentUser() AND updated >= "<date>" ORDER BY updated ASC`,
+     where `<date>` is `tars cursor jira --as jql` — a date a day before the
+     watermark, because JQL reads dates in the Jira user's time zone. Issues
+     re-fetched from that overlap come back `unchanged`.
    - Concrete issues: `key in (PROJ-123, PROJ-124) ORDER BY updated ASC`.
    - Under an epic: `parent = "<EPIC-KEY>" ORDER BY updated ASC`. If that returns
      nothing on a classic company-managed project, retry with

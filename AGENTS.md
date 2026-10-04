@@ -238,7 +238,7 @@ properties — keep them straight:
   (token-frugal slices; a full show on a transcript can be ~30k tokens),
   `tars list [--connector ...] [--since <ISO>] [--json]`,
   `tars promote <ref> --title ...`, `tars rm <ref> [--yes]`,
-  `tars cursor <connector> [--set ... | --begin | --commit]`,
+  `tars cursor <connector> [--set ... | --begin | --commit | --as epoch|jql]`,
   `tars sync <connector>`, `tars normalize`, `tars reindex`, `tars migrate`,
   `tars backup [dir] [--keep N]`, `tars doctor [--json]`, `tars status`.
 - **`<ref>`** names one document in every command above. Exact forms first:
