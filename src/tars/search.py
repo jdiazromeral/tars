@@ -17,6 +17,11 @@ class Hit:
     score: float
     file: str  # raw filename stem — the [[wiki-link]] target for this document
     chunk: str | None = None  # full text of the best-matching chunk (opt-in)
+    annotates: str | None = None  # an annotation's target, as its file stem (wiki-link)
+
+
+def _stem(raw_dir: str) -> str:
+    return raw_dir.rsplit("/", 1)[-1].removesuffix(".md")
 
 
 def to_match_expr(query: str) -> str:
@@ -41,10 +46,11 @@ def search(db: sqlite3.Connection, query: str, k: int = 8,
     sql = """
         SELECT d.id, d.connector, d.origin, d.title, d.raw_dir, c.text AS chunk_text,
                snippet(chunks_fts, 0, '[', ']', ' … ', 18) AS snip,
-               bm25(chunks_fts) AS score
+               bm25(chunks_fts) AS score, t.raw_dir AS target_raw_dir
         FROM chunks_fts
         JOIN chunks c ON c.id = chunks_fts.rowid
         JOIN documents d ON d.id = c.doc_id
+        LEFT JOIN documents t ON t.id = json_extract(d.meta, '$.annotates')
         WHERE chunks_fts MATCH ?
     """
     params: list = [match]
@@ -63,8 +69,9 @@ def search(db: sqlite3.Connection, query: str, k: int = 8,
         hits.append(Hit(doc_id=row["id"], connector=row["connector"],
                         origin=row["origin"], title=row["title"],
                         snippet=row["snip"], score=row["score"],
-                        file=row["raw_dir"].rsplit("/", 1)[-1].removesuffix(".md"),
-                        chunk=row["chunk_text"] if with_chunk else None))
+                        file=_stem(row["raw_dir"]),
+                        chunk=row["chunk_text"] if with_chunk else None,
+                        annotates=_stem(row["target_raw_dir"]) if row["target_raw_dir"] else None))
         if len(hits) >= k:
             break
     return hits
