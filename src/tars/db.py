@@ -51,6 +51,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 {FTS_DDL}
 
 -- annotations_of() looks annotations up by their target on every show/rm
+DROP INDEX IF EXISTS documents_annotates;  -- #13's index on the old key
 CREATE INDEX IF NOT EXISTS documents_annotates_id
     ON documents (json_extract(meta, '$.annotates_id'));
 

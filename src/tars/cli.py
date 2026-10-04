@@ -606,14 +606,15 @@ def rm(ref: str, yes: bool):
         names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
         click.confirm(f"delete {doc_id}  [{row['connector']}] {row['title'] or row['origin']}"
                       f"  ({names}) and its index entry?", abort=True)
-    annotations = ingest.annotations_of(db, doc_id)
+    # The user's own words are kept, never cascaded — but their link to the
+    # target goes with it (it carries the target's file name, i.e. its title).
+    kept = ingest.unlink_annotations(root, db, doc_id)
     removed = ingest.remove(root, db, doc_id)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
-    stem = store.stem_of(row["raw_dir"])
-    for note in annotations:  # the user's own words: kept, never cascaded
-        click.echo(f"  annotation {note['id']} still points at it (kept; its [[{stem}]] link in "
-                   "Obsidian is now unresolved — `tars rm` it if unwanted)")
-    for linker in doctor_mod.references_to(root, store.stem_of(row["raw_dir"])):
+    for note_id in kept:
+        click.echo(f"  annotation {note_id} kept as a plain note, its link to the deleted "
+                   "document dropped — `tars rm` it if unwanted")
+    for linker in doctor_mod.references_to(root, raw_path.stem):
         click.echo(f"  still referenced in {linker}")
 
 

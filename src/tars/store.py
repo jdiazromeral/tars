@@ -242,7 +242,12 @@ class _DoubleQuoted(str):
     """Emitted as "…": Obsidian's own form for a link inside a property."""
 
 
-yaml.SafeDumper.add_representer(
+class _Dumper(yaml.SafeDumper):
+    """SafeDumper plus _DoubleQuoted, kept local: registering on yaml.SafeDumper
+    itself would change every safe_dump in the process."""
+
+
+_Dumper.add_representer(
     _DoubleQuoted, lambda dumper, data: dumper.represent_scalar(
         "tag:yaml.org,2002:str", str(data), style='"'))
 
@@ -266,7 +271,8 @@ def write_raw(root: Path, doc: RawDoc, path: Path,
         frontmatter["annotates"] = _DoubleQuoted(doc.annotates)
     if "annotates_id" in doc.meta:  # hex; quoted, or YAML 1.2 reads 0361… as a number
         frontmatter["meta"] = {**doc.meta, "annotates_id": _DoubleQuoted(doc.meta["annotates_id"])}
-    header = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
+    header = yaml.dump(frontmatter, Dumper=_Dumper, sort_keys=False,
+                       allow_unicode=True).strip()
     payload = f"---\n{header}\n---\n\n{render_body(doc)}\n"
     # Raw is truth: leave the file untouched (bytes AND mtime) when nothing changed,
     # so an index rebuild can never churn the archive. Written via temp file +
@@ -374,6 +380,9 @@ def read_raw(content_md: Path, v1: bool = False) -> RawDoc:
     captured = fm.get("captured_at")
     if isinstance(captured, datetime):  # YAML parses unquoted timestamps eagerly
         captured = captured.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    if "annotates" in meta and "annotates_id" not in meta:  # #13's key, before the rename
+        meta["annotates_id"] = meta.pop("annotates")
 
     return RawDoc(
         connector=fm["connector"],

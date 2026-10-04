@@ -73,7 +73,9 @@ tars.db                           disposable index — tars reindex rebuilds it
   own output — `tars show` names how many there are, `tars show <ref>
   --annotations` lists them — so nothing mining a source for commitments
   reads the user's words as the source's. A search hit on one is marked
-  `↳ on [[target]]`; `tars rm` of the target warns and keeps them.
+  `↳ on [[target]]`. `tars rm` of the target keeps them as plain notes and
+  drops their `annotates` link, which carries the target's file name (its
+  title) — what is being redacted must not live on in them.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
   after ingest (comments, status, state). The incremental watermark only
   *discovers* changes for items in scope (e.g. assigned to me); an item pulled
