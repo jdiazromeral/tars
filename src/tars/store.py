@@ -291,7 +291,10 @@ def _frontmatter_problem(fm) -> str | None:
     return None
 
 
-def read_raw(content_md: Path) -> RawDoc:
+def read_raw(content_md: Path, v1: bool = False) -> RawDoc:
+    """Parse one raw file. `v1=True` is for `migrate` only — every other command
+    refuses a v1 vault, so outside it a file without a `concepts:` key is v2
+    with no concepts, never a reason to fall back to the v1 body-line parse."""
     try:
         raw = content_md.read_text()
     except (OSError, UnicodeDecodeError) as exc:
@@ -311,11 +314,12 @@ def read_raw(content_md: Path) -> RawDoc:
     # The Concepts: line is a derived rendering — strip it back out of the body.
     # v2: only its exact rendering of the frontmatter concepts is derived; any
     # other first line (an unshelved note that starts "Concepts: ...") is content.
-    # v1 (no `concepts` key): the body line held the concepts; migrate reads it.
+    # v1 (migrate only, no `concepts` key): the body line held the concepts.
+    legacy = v1 and "concepts" not in fm
     line_concepts: list[str] = []
-    if "concepts" in fm:
+    if not legacy:
         first, _, rest = text.partition("\n")
-        if fm["concepts"] and first == concepts_line(fm["concepts"]):
+        if fm.get("concepts") and first == concepts_line(fm["concepts"]):
             text = rest.lstrip("\n")
     elif text.startswith("Concepts: "):
         first, _, rest = text.partition("\n")
@@ -323,7 +327,7 @@ def read_raw(content_md: Path) -> RawDoc:
         text = rest.lstrip("\n")
 
     meta = fm.get("meta") or {}
-    if "concepts" in fm:  # v2: frontmatter is the single truth
+    if not legacy:  # v2: frontmatter is the single truth
         concepts = fm.get("concepts") or []
     else:  # v1 compat: concepts lived in the body line and/or meta
         concepts = line_concepts or meta.pop("concepts", [])

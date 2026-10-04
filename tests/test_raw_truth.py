@@ -208,3 +208,18 @@ def test_only_the_exact_derived_line_is_stripped(root):
     raw.write_text("---\nid: 000000000003\nconnector: note\norigin: note:s\ntitle: s\n"
                    "tags: []\nconcepts:\n- auth\nmeta: {}\n---\n\nConcepts: my own words\nbody\n")
     assert store.read_raw(raw).text == "Concepts: my own words\nbody"
+
+
+def test_missing_concepts_key_does_not_switch_to_v1_parsing(root):
+    # Only `migrate` reads v1 files (every other command refuses a v1 vault),
+    # so a v2 file whose `concepts:` key was deleted by hand is still v2:
+    # no concepts, and the user's own leading "Concepts:" line is kept.
+    path, runner = root
+    text = "Concepts: auth, billing - agenda\nreal body"
+    _add(runner, text, "--title", "Agenda")
+    raw = path / "raw/note/agenda.md"
+    raw.write_text(raw.read_text().replace("concepts: []\n", ""))
+
+    doc = store.read_raw(raw)
+    assert doc.text == text
+    assert doc.concepts == []

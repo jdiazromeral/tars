@@ -372,7 +372,7 @@ def migrate():
     rewritten, unparseable = 0, []
     for content_md in store.iter_raw(root):
         try:
-            doc = store.read_raw(content_md)  # v1-compat parse pulls concepts out of the body
+            doc = store.read_raw(content_md, v1=True)  # pulls concepts out of the body line
         except store.UnparseableRaw as exc:
             unparseable.append((content_md, exc.reason))
             continue
