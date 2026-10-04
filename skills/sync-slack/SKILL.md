@@ -151,8 +151,12 @@ timestamp per channel, stored under a **namespaced key** — no CLI changes,
 ```sh
 tars cursor "slack/<CHANNEL_ID>"            # read (empty on first run)
 tars cursor "slack/<CHANNEL_ID>" --begin    # stamp pending BEFORE fetching
-tars cursor "slack/<CHANNEL_ID>" --commit   # promote ONLY after clean ingest
+tars cursor "slack/<CHANNEL_ID>" --commit   # promote ONLY after a complete, clean run
 ```
+
+A run capped by `max_threads_per_run` keeps a separate **resume point**,
+`slack/<CHANNEL_ID>/resume` (B3), so the main cursor always means "the last
+complete sweep" — the refresh pass below depends on that.
 
 Bracket **each channel independently**: a channel that errors leaves its own
 cursor uncommitted (next sweep re-scans it) without holding back the others.
@@ -161,9 +165,11 @@ never touch these cursors.
 
 ## B3. Discover threads — the CLI selects, you don't
 
-Per channel, page `slack_read_channel` with `oldest=<epoch>` — `tars cursor
-"slack/<CHANNEL_ID>" --as epoch`, Slack's own form — until exhausted, then
-hand the raw history to the CLI and capture what it returns:
+Per channel, page `slack_read_channel` with `oldest=<epoch>` until exhausted,
+where `<epoch>` is the resume point if one is set — `tars cursor
+"slack/<CHANNEL_ID>/resume" --as epoch` — and otherwise `tars cursor
+"slack/<CHANNEL_ID>" --as epoch` (Slack's own form). Then hand the raw history
+to the CLI and capture what it returns:
 
 ```sh
 echo '<conversations.history JSON>' \
@@ -187,11 +193,19 @@ matches; a false negative is permanently absent), and the anti-signal nullifies
 **only** the link signal — an attachment plus a link to an ingested PR still
 qualifies, on the attachment.
 
-If `truncated` is true the run hit `max_threads_per_run`: capture what came
-back, then — instead of `--commit` — move the watermark to the last thread
-captured: `tars cursor "slack/<CHANNEL_ID>" --set "<resume_from>"`. The next
-run starts right after it (`oldest=` is exclusive). Not committing at all would
-re-read the same window and re-select the same oldest threads forever.
+Then, **only if every selected thread was captured**:
+
+- `truncated` is false — the window is done: `tars cursor "slack/<CHANNEL_ID>"
+  --commit`, then `tars cursor "slack/<CHANNEL_ID>/resume" --clear`.
+- `truncated` is true — the run hit `max_threads_per_run`: don't commit; set
+  the resume point to the last thread captured, `tars cursor
+  "slack/<CHANNEL_ID>/resume" --set "<resume_from>"`. The next run reads from
+  right after it (`oldest=` is exclusive) and keeps going until a run
+  completes. (Not moving anything would re-select the same oldest threads
+  forever.)
+
+If any selected thread failed to capture, touch neither cursor: the next run
+re-reads the same window, and already-captured threads come back `unchanged`.
 
 ### Refresh already-ingested threads (mutable sources go stale)
 
@@ -253,7 +267,7 @@ threads that actually grew, and the CLI's own `skipped` tally verbatim — it
 already counts by reason (`no-signal`, `redundant-link-only`,
 `bot-or-subtype`, `over-run-cap`), so pass it through rather than recounting.
 Then the new watermark — or **"resumes at <resume_from>"** when `truncated`
-(B3), or **"uncommitted"** with the error. Finally people linked/backfilled and concepts created vs
+(B3), or **"uncommitted"** with the thread that failed. Finally people linked/backfilled and concepts created vs
 reused. Naming the admitting signal is what makes the thresholds tunable from
 evidence instead of taste; naming every skipped class is what keeps silent
 truncation from reading as coverage.
@@ -293,7 +307,7 @@ truncation from reading as coverage.
   `window_days`, and B4 assembles each thread verbatim in-context, so a wide
   first sweep is one long agent run with real context-exhaustion risk. Prefer a
   short `window_days` on first contact, and lean on `max_threads_per_run`: a
-  truncated run moves its watermark to the last thread it captured, so
+  truncated run sets a resume point at the last thread it captured, so
   resuming is just running again.
 - **Attachment `file_id`s live in the document body**, not in structured
   metadata (`tars add` has no `--meta`, and adding one is out of scope here).

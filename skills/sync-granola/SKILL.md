@@ -17,7 +17,11 @@ and never write into raw/ directly.
    first run. On first run, ask the user how far back to go (default: 30 days).
    Then, **before listing**, stamp the sweep start: `tars cursor granola
    --begin` (the CLI records `now()` in a pending slot).
-2. **List meetings** since the watermark with the Granola MCP tools (load them
+2. **List meetings** since `tars cursor granola --lookback 24` — the watermark
+   a day early, so a meeting that was in progress or still transcribing at the
+   last sync is listed again and its fuller notes replace the partial ones
+   (stored meetings that didn't change come back `unchanged`). Use the Granola
+   MCP tools (load them
    via ToolSearch if deferred: `list_meetings` / `get_meetings`). Paginate
    until exhausted — do not silently cap.
 3. **For each meeting**, fetch notes and transcript (`get_meeting_transcript`),
@@ -71,14 +75,16 @@ and never write into raw/ directly.
    and report what changed. Never correct raw text any other way, and never
    add an entry unapproved. Skip generic words that could appear legitimately
    (that's exactly what connector scoping protects, but don't lean on it).
-5. **Commit the watermark only if no meeting was skipped**: `tars cursor
-   granola --commit`. A meeting skipped for an empty transcript (still being
-   processed) or an MCP error must be fetched again next run, and a committed
-   watermark would put it out of reach for good — so any skip leaves the
-   cursor uncommitted, and the next run re-lists the window (meetings already
-   stored come back `unchanged`). Never `--set` it to a meeting's start time.
+5. **Commit the watermark unless the MCP errored**: `tars cursor granola
+   --commit`. A meeting with an empty transcript isn't an error: capture its
+   notes (a notes-only meeting is still a record); if it has neither notes nor
+   transcript, it was likely still processing, and the 24-hour lookback lists
+   it again next run. An **MCP error** on any meeting leaves the cursor
+   uncommitted so the next run retries; if the same meeting errors on repeated
+   runs, tell the user — they decide whether to commit past it. Never `--set`
+   the cursor to a meeting's start time.
 6. **Report**: counts of added / updated / unchanged, the new watermark (or
    **"uncommitted"** and which meetings caused it),
    concepts created vs reused, vocab entries proposed/added, and any meetings
-   skipped because the transcript was empty or the MCP errored — name them
-   explicitly so nothing is silently dropped.
+   captured with notes only, left for next run (no notes or transcript yet), or
+   failed in the MCP — name them explicitly so nothing is silently dropped.

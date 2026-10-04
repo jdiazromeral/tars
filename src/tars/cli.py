@@ -397,11 +397,16 @@ def sync(connector: str | None):
 @click.option("--commit", is_flag=True,
               help="Promote the pending watermark to live; "
                    "call only after a sweep ingests cleanly.")
+@click.option("--clear", is_flag=True, help="Forget this watermark entirely.")
 @click.option("--as", "form", type=click.Choice(syncstate.FORMS), default="iso",
               show_default=True,
               help="Print the watermark as the source reads it: epoch (Gmail after:, "
                    "Slack oldest=) or jql (a date a day early, for updated >=).")
-def cursor(connector: str, value: str | None, begin: bool, commit: bool, form: str):
+@click.option("--lookback", type=click.IntRange(min=0), default=0,
+              help="Print the watermark this many hours early (re-reads a recent "
+                   "window whose items may still be changing; re-ingest is a no-op).")
+def cursor(connector: str, value: str | None, begin: bool, commit: bool, clear: bool,
+           form: str, lookback: int):
     """Read or advance the sync watermark for a connector (used by skill-fed syncs).
 
     Two-phase advance keeps the watermark safe by construction: `--begin` stamps
@@ -414,10 +419,11 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool, form: s
     watermark per scope with a namespaced key (e.g. `slack/<CHANNEL_ID>`), so
     each scope brackets independently and one failure never stalls the rest.
     """
-    if sum((value is not None, begin, commit)) > 1:
-        raise click.ClickException("choose exactly one of --set / --begin / --commit")
-    if form != "iso" and (value is not None or begin or commit):
-        raise click.ClickException("--as only formats a watermark being read")
+    writes = sum((value is not None, begin, commit, clear))
+    if writes > 1:
+        raise click.ClickException("choose exactly one of --set / --begin / --commit / --clear")
+    if writes and (form != "iso" or lookback):
+        raise click.ClickException("--as and --lookback only format a watermark being read")
     _, db = _open()
     if begin:
         click.echo(syncstate.begin(db, connector))
@@ -428,8 +434,13 @@ def cursor(connector: str, value: str | None, begin: bool, commit: bool, form: s
             raise click.ClickException(f"{exc} — run `cursor {connector} --begin` first")
     elif value is not None:
         syncstate.set_cursor(db, connector, value)
+    elif clear:
+        syncstate.clear(db, connector)
     elif current := syncstate.get_cursor(db, connector):
-        click.echo(syncstate.as_form(current, form))
+        try:
+            click.echo(syncstate.as_form(current, form, lookback))
+        except ValueError as exc:
+            raise click.ClickException(f"cursor {connector}: {exc}")
 
 
 @main.command()

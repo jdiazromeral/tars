@@ -112,3 +112,60 @@ def test_a_slack_resume_point_keeps_its_microseconds_as_epoch(root):
     runner.invoke(main, ["cursor", "slack/C0AAA111", "--set", "2026-10-03T04:01:00.000100Z"])
     result = runner.invoke(main, ["cursor", "slack/C0AAA111", "--as", "epoch"])
     assert result.output.strip() == "1791000060.000100"
+
+
+# --- review of #15 ---------------------------------------------------------------
+
+def test_set_drops_a_stale_pending_stamp(root):
+    # A manual --set supersedes any in-flight sweep: a later --commit must not
+    # promote an old sweep-start over it.
+    _, runner = root
+    runner.invoke(main, ["cursor", "gmail", "--begin"])
+    runner.invoke(main, ["cursor", "gmail", "--set", "2026-09-01T00:00:00Z"])
+    assert runner.invoke(main, ["cursor", "gmail", "--commit"]).exit_code != 0
+    assert runner.invoke(main, ["cursor", "gmail"]).output.strip() == "2026-09-01T00:00:00Z"
+
+
+def test_clear_empties_a_cursor(root):
+    _, runner = root
+    runner.invoke(main, ["cursor", "slack/C0AAA111/resume", "--set", "2026-09-01T00:00:00Z"])
+    assert runner.invoke(main, ["cursor", "slack/C0AAA111/resume", "--clear"]).exit_code == 0
+    assert runner.invoke(main, ["cursor", "slack/C0AAA111/resume"]).output == ""
+
+
+def test_a_timestamp_without_a_zone_is_utc_not_local(root, monkeypatch):
+    # Read as local time, New York would land 4h late: a gap, not an overlap.
+    import time
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    _, runner = root
+    runner.invoke(main, ["cursor", "gmail", "--set", "2026-10-04T08:30:00"])
+    out = runner.invoke(main, ["cursor", "gmail", "--as", "epoch"]).output.strip()
+    monkeypatch.undo()
+    time.tzset()
+    assert out == "1791102600"
+
+
+def test_a_non_iso_cursor_reads_back_and_converts_cleanly(root):
+    _, runner = root
+    runner.invoke(main, ["cursor", "legacy", "--set", "yesterday"])
+    assert runner.invoke(main, ["cursor", "legacy"]).output.strip() == "yesterday"
+    result = runner.invoke(main, ["cursor", "legacy", "--as", "epoch"])
+    assert result.exit_code == 1 and "not an ISO timestamp" in result.output
+
+
+@pytest.mark.parametrize("fmt, expected", [("iso", "2026-10-03T08:30:00Z"),
+                                           ("epoch", "1791016200")])
+def test_lookback_reads_the_window_early(root, fmt, expected):
+    # Granola lists meetings by start time: a meeting in progress at sync time
+    # must be listed again next run, so its window starts a day early.
+    _, runner = root
+    runner.invoke(main, ["cursor", "granola", "--set", "2026-10-04T08:30:00Z"])
+    result = runner.invoke(main, ["cursor", "granola", "--lookback", "24", "--as", fmt])
+    assert result.output.strip() == expected
+
+
+def test_select_survives_an_odd_ts():
+    report = slack.select([{"ts": "abc", "text": "x", "reply_count": 1},
+                           {"ts": "1791000000.000100", "text": "y", "reply_count": 1}], _cfg())
+    assert [s.thread_ts for s in report.selected][-1] == "1791000000.000100"
