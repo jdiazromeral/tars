@@ -345,21 +345,20 @@ def promote(ref: str, title: str):
     doc_id = row["id"]
     source_stem = store.stem_of(row["raw_dir"])
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
-    if note_path.exists():
-        raise click.ClickException(f"note already exists: {note_path}")
-    note_path.write_text(
-        f"""---
-title: {title}
-promoted_at: {store.now_iso()}
-source_doc: {doc_id}
-source_origin: {row['origin']}
-source_connector: {row['connector']}
----
-
-<!-- distilled insight goes here -->
-
-Source: [[{source_stem}|{row['title'] or row['origin']}]]
-""")
+    # [[stem]] links are one flat namespace: a stem another file already owns
+    # would make every link to either resolve arbitrarily.
+    owner = next((f for f in store.linkable_files(root) if f.stem == note_path.stem), None)
+    if owner:
+        raise click.ClickException(
+            f"[[{note_path.stem}]] is taken by {owner.relative_to(root)} — title the note "
+            "for the insight it distills, not after its source")
+    fields = {"title": title, "promoted_at": store.now_iso(),
+              "source_doc": store.quoted(doc_id), "source_origin": row["origin"],
+              "source_connector": row["connector"]}
+    label = store.link_label(row["title"] or row["origin"])
+    note_path.write_text(f"{store.frontmatter_block(fields)}\n"
+                         "<!-- distilled insight goes here -->\n\n"
+                         f"Source: [[{source_stem}|{label}]]\n")
     click.echo(note_path)
 
 
@@ -633,6 +632,9 @@ def rm(ref: str, yes: bool):
                    "document dropped — `tars rm` it if unwanted")
     for linker in doctor_mod.references_to(root, raw_path.stem):
         click.echo(f"  still referenced in {linker}")
+    click.echo(f"  not erased: its title and origin in {store.INGEST_LOG} (append-only), "
+               "the vault's git history, and any backups — rewrite those by hand if this "
+               "was a secret")
 
 
 @main.command()

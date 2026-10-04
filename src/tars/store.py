@@ -174,6 +174,14 @@ TRACKING_PARAMS = re.compile(r"^(utm_\w+|gclid|fbclid|msclkid|mc_cid|mc_eid|igsh
 WIKI_LINK_RE = re.compile(r"\[\[([^\]|\\]+)(?:\\?\|[^\]]*)?\]\]")
 
 
+def link_label(text: str) -> str:
+    """Text made safe as a [[stem|label]] alias: one line (a newline would
+    start a heading or list item of its own), no brackets or pipes (they would
+    end or split the link). A title is a label, never markup."""
+    label = " ".join(text.split())
+    return label.replace("[", "(").replace("]", ")").replace("|", "/")
+
+
 def stem_of(raw_dir: str) -> str:
     """A raw file's name without `.md` — its [[wiki-link]] target."""
     return Path(raw_dir).stem
@@ -255,6 +263,16 @@ class _Dumper(yaml.SafeDumper):
 _Dumper.add_representer(
     _DoubleQuoted, lambda dumper, data: dumper.represent_scalar(
         "tag:yaml.org,2002:str", str(data), style='"'))
+
+
+quoted = _DoubleQuoted  # for callers writing a hex id YAML 1.2 might read as a number
+
+
+def frontmatter_block(fields: dict) -> str:
+    """A `---` YAML block, from the same dumper as raw files: values are
+    escaped, never interpolated, so a title can't break or inject a field."""
+    body = yaml.dump(fields, Dumper=_Dumper, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{body}\n---\n"
 
 
 def write_raw(root: Path, doc: RawDoc, path: Path,

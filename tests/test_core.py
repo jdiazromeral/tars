@@ -268,7 +268,7 @@ def test_promote_creates_linked_note(root):
     note = path / "wiki/notes" / "why-we-did-the-thing.md"
     assert note.exists()
     body = note.read_text()
-    assert f"source_doc: {doc_id}" in body
+    assert f'source_doc: "{doc_id}"' in body  # quoted: an all-digit hex id is no number
     assert "source_origin: note:p" in body
     assert f"Source: [[{doc_id}|" in body  # Obsidian backlink to the raw doc
 
