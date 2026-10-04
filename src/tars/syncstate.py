@@ -26,33 +26,38 @@ from . import store
 FORMS = ("iso", "epoch", "jql")
 
 
-def as_form(iso: str, form: str) -> str:
-    """The watermark `iso` as a source reads it.
+def as_form(value: str, form: str, lookback_hours: int = 0) -> str:
+    """The watermark `value` as a source reads it, optionally `lookback_hours`
+    early.
 
-    - iso: as stored.
+    - iso: as stored (or shifted by the lookback).
     - epoch: Unix seconds, for Gmail `after:` and Slack `oldest=`; keeps
       microseconds when the watermark has them (a Slack resume point).
     - jql: a date a day early, for `updated >= "<date>"`. JQL reads dates in
       the Jira user's time zone, which tars doesn't know; starting a day early
       covers any offset.
+
+    A timestamp without a zone is UTC — read as local time it could land late,
+    opening a gap. Raises ValueError for a value that isn't an ISO timestamp
+    (only when it has to be parsed: plain iso reads print it as stored).
     """
-    when = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(timezone.utc)
-    if form == "iso":
-        return iso
+    if form not in FORMS:
+        raise ValueError(f"unknown watermark form {form!r} (one of {', '.join(FORMS)})")
+    if form == "iso" and not lookback_hours:
+        return value
+    try:
+        when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"{value!r} is not an ISO timestamp") from None
+    when = (when.replace(tzinfo=timezone.utc) if when.tzinfo is None
+            else when.astimezone(timezone.utc)) - timedelta(hours=lookback_hours)
     if form == "epoch":
         seconds = calendar.timegm(when.utctimetuple())  # exact: no float round-trip
         return f"{seconds}.{when.microsecond:06d}" if when.microsecond else str(seconds)
     if form == "jql":
         return (when - timedelta(days=1)).date().isoformat()
-    raise ValueError(f"unknown watermark form {form!r} (one of {', '.join(FORMS)})")
-
-
-def from_slack_ts(ts: str) -> str:
-    """A Slack message ts (`1791000060.000100`) as an exact ISO watermark."""
-    seconds, _, fraction = ts.partition(".")
-    base = datetime.fromtimestamp(int(seconds), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-    micro = fraction.ljust(6, "0")[:6]
-    return f"{base}.{micro}Z" if int(micro or 0) else f"{base}Z"
+    fraction = f".{when.microsecond:06d}" if when.microsecond else ""
+    return when.strftime("%Y-%m-%dT%H:%M:%S") + fraction + "Z"
 
 
 def get_cursor(db: sqlite3.Connection, key: str) -> str | None:
@@ -61,14 +66,23 @@ def get_cursor(db: sqlite3.Connection, key: str) -> str | None:
 
 
 def set_cursor(db: sqlite3.Connection, key: str, value: str) -> None:
-    """Make `value` the live watermark and stamp the sync time."""
+    """Make `value` the live watermark and stamp the sync time. Drops any
+    pending stamp: a set supersedes an in-flight sweep, so a later `commit`
+    can't promote an older sweep-start over it."""
     with db:
         db.execute(
             "INSERT INTO sync_state (connector, cursor, last_sync) VALUES (?, ?, ?) "
             "ON CONFLICT(connector) DO UPDATE SET cursor = excluded.cursor, "
-            "last_sync = excluded.last_sync",
+            "last_sync = excluded.last_sync, pending_cursor = NULL",
             (key, value, store.now_iso()),
         )
+
+
+def clear(db: sqlite3.Connection, key: str) -> None:
+    """Forget a watermark entirely (e.g. a Slack resume point once a sweep
+    completes)."""
+    with db:
+        db.execute("DELETE FROM sync_state WHERE connector = ?", (key,))
 
 
 def begin(db: sqlite3.Connection, key: str) -> str:

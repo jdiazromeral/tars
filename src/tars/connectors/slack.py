@@ -33,12 +33,11 @@ from __future__ import annotations
 import fnmatch
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
-
-from .. import syncstate
 
 CONFIG_FILE = "connectors.yml"
 
@@ -170,6 +169,23 @@ def _reaction_total(message: dict) -> int:
     return sum(int(r.get("count", 0)) for r in message.get("reactions") or [])
 
 
+def _ts_key(message: dict) -> float:
+    """Sort key for a message's ts; an odd one sorts first and is then skipped
+    or kept by the usual rules instead of crashing the whole selection."""
+    try:
+        return float(message.get("ts") or 0)
+    except (TypeError, ValueError):
+        return float("-inf")
+
+
+def _ts_to_iso(ts: str) -> str:
+    """A Slack message ts (`1791000060.000100`) as an exact ISO watermark."""
+    seconds, _, fraction = ts.partition(".")
+    base = datetime.fromtimestamp(int(seconds), timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    micro = fraction.ljust(6, "0")[:6]
+    return f"{base}.{micro}Z" if int(micro or 0) else f"{base}Z"
+
+
 def select(messages: list[dict], cfg: dict) -> SelectionReport:
     """Choose which messages in a fetched window become captured threads.
 
@@ -182,7 +198,7 @@ def select(messages: list[dict], cfg: dict) -> SelectionReport:
     cap = cfg.get("max_threads_per_run") or 0
     patterns = cfg.get("redundant_link_patterns") or []
 
-    for message in sorted(messages, key=lambda m: float(m.get("ts") or 0)):
+    for message in sorted(messages, key=_ts_key):
         ts = message.get("ts")
         if not ts:
             report._skip("no-ts")
@@ -226,7 +242,7 @@ def select(messages: list[dict], cfg: dict) -> SelectionReport:
         )
 
     if report.truncated and report.selected:
-        report.resume_from = syncstate.from_slack_ts(report.selected[-1].thread_ts)
+        report.resume_from = _ts_to_iso(report.selected[-1].thread_ts)
     return report
 
 
