@@ -153,36 +153,44 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
             ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
                                     connector=doc.connector, origin=doc.origin, title=doc.title)
         raw_path = store.write_raw(root, doc, path, source_bytes, source_ext)
-        db.execute(
-            """
-            INSERT INTO documents (id, connector, origin, title, captured_at,
-                                   content_hash, raw_dir, concepts, meta)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                captured_at = excluded.captured_at,
-                content_hash = excluded.content_hash,
-                raw_dir = excluded.raw_dir,
-                concepts = excluded.concepts,
-                meta = excluded.meta
-            """,
-            (doc.id, doc.connector, doc.origin, doc.title, doc.captured_at,
-             digest, str(raw_path.relative_to(root)), json.dumps(doc.concepts),
-             json.dumps(doc.meta)),
-        )
-        db.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.id,))
-        # Index the rendered body (concepts line included) so searching a
-        # concept slug surfaces everything shelved under it.
-        db.executemany(
-            "INSERT INTO chunks (doc_id, seq, text) VALUES (?, ?, ?)",
-            [(doc.id, seq, text)
-             for seq, text in enumerate(chunk_text(store.render_body(doc)))],
-        )
+        index_doc(db, doc, digest, str(raw_path.relative_to(root)))
         db.commit()
     except BaseException:
         db.rollback()
         raise
     return doc.id, status
+
+
+def index_doc(db: sqlite3.Connection, doc: RawDoc, digest: str, raw_dir: str) -> None:
+    """Write one document's index row and chunks — the cache side only, never raw.
+
+    Runs inside the caller's transaction and does not commit: `add` wraps it
+    with the raw write, `reindex` with the whole rebuild.
+    """
+    db.execute(
+        """
+        INSERT INTO documents (id, connector, origin, title, captured_at,
+                               content_hash, raw_dir, concepts, meta)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            captured_at = excluded.captured_at,
+            content_hash = excluded.content_hash,
+            raw_dir = excluded.raw_dir,
+            concepts = excluded.concepts,
+            meta = excluded.meta
+        """,
+        (doc.id, doc.connector, doc.origin, doc.title, doc.captured_at,
+         digest, raw_dir, json.dumps(doc.concepts), json.dumps(doc.meta)),
+    )
+    db.execute("DELETE FROM chunks WHERE doc_id = ?", (doc.id,))
+    # Index the rendered body (concepts line included) so searching a
+    # concept slug surfaces everything shelved under it.
+    db.executemany(
+        "INSERT INTO chunks (doc_id, seq, text) VALUES (?, ?, ?)",
+        [(doc.id, seq, text)
+         for seq, text in enumerate(chunk_text(store.render_body(doc)))],
+    )
 
 
 def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
@@ -208,18 +216,35 @@ def remove(root: Path, db: sqlite3.Connection, doc_id: str) -> sqlite3.Row:
     return row
 
 
-def reindex(root: Path, db: sqlite3.Connection) -> int:
+def reindex(root: Path, db: sqlite3.Connection) -> tuple[int, list[tuple[Path, str]]]:
     """Rebuild the whole index from raw/. The DB is a cache; raw/ is truth.
 
-    Rebuilding the cache is not an ingestion event, so `log=False` keeps it out
-    of the append-only ingestion log — otherwise every reindex would re-log the
-    whole corpus as freshly `added`.
+    A pure read of the archive: each file is parsed and indexed as it stands —
+    never rewritten, never re-normalized (applying vocab is `tars normalize`'s
+    job), so a rebuild can't drop a byte. Not an ingestion event either, so
+    nothing is logged.
+
+    The rebuild is one transaction: readers keep the old index until it
+    commits, and a crash halfway rolls back to it instead of leaving a
+    half-empty cache. A file that doesn't parse is skipped and returned with
+    the reason, so one bad file can't take the other documents down with it.
+    Returns (documents indexed, [(unparseable path, reason)]).
     """
-    with db:
+    count, unparseable = 0, []
+    db.execute("BEGIN IMMEDIATE")
+    try:
         db.execute("DELETE FROM documents")
-    count = 0
-    for content_md in store.iter_raw(root):
-        add(root, db, store.read_raw(content_md),
-            raw_dir=str(content_md.relative_to(root)), log=False)
-        count += 1
-    return count
+        for content_md in store.iter_raw(root):
+            try:
+                doc = store.read_raw(content_md)
+            except ValueError as exc:
+                unparseable.append((content_md, str(exc).removeprefix(f"{content_md}: ")))
+                continue
+            index_doc(db, doc, store.content_hash(doc.text),
+                      str(content_md.relative_to(root)))
+            count += 1
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return count, unparseable

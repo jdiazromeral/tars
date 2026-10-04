@@ -8,7 +8,8 @@ the index down with it.
 import pytest
 from click.testing import CliRunner
 
-from tars import store
+from tars import db as db_mod
+from tars import ingest, store
 from tars.cli import main
 
 
@@ -50,3 +51,57 @@ def test_shelved_doc_keeps_its_own_concepts_line(root):
     doc = store.read_raw(path / "raw/note/shelved.md")
     assert doc.text == text
     assert doc.concepts == ["auth"]
+
+
+def test_reindex_never_rewrites_raw(root):
+    # Hand-added frontmatter and a vocab rule added after capture are both
+    # things a rebuild used to "fix" by rewriting the file; a cache rebuild
+    # has no business touching the archive. Normalizing is `tars normalize`'s job.
+    path, runner = root
+    _add(runner, "we use acne for billing", "--title", "Billing")
+    raw = path / "raw/note/billing.md"
+    raw.write_text(raw.read_text().replace("meta: {}\n", "meta: {}\nreviewed: true\n"))
+    (path / "vocab.yml").write_text("Acme:\n  variants: [acne]\n")
+    before = raw.read_bytes()
+
+    result = runner.invoke(main, ["reindex"])
+    assert result.exit_code == 0, result.output
+    assert raw.read_bytes() == before
+
+
+def test_reindex_skips_unparseable_file_and_indexes_the_rest(root):
+    # One truncated file must not leave the index a third full: every other
+    # document is indexed, the bad one is named, and the exit code says so.
+    path, runner = root
+    for name in ("alpha", "bravo", "charlie"):
+        _add(runner, f"{name} body", "--title", name)
+    (path / "raw/note/bravo.md").write_text("")
+
+    result = runner.invoke(main, ["reindex"])
+    assert result.exit_code == 1
+    assert "raw/note/bravo.md" in result.output
+    conn = db_mod.connect(path)
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 2
+
+
+def test_reindex_failure_keeps_the_old_index(root, monkeypatch):
+    # The rebuild is one transaction: a crash halfway leaves the previous
+    # index intact instead of a committed DELETE and a partial refill.
+    path, runner = root
+    for name in ("alpha", "bravo", "charlie"):
+        _add(runner, f"{name} body", "--title", name)
+
+    calls = []
+    real = ingest.index_doc
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("disk on fire")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ingest, "index_doc", flaky)
+    conn = db_mod.connect(path)
+    with pytest.raises(RuntimeError):
+        ingest.reindex(path, conn)
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 3
