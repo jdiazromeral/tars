@@ -25,6 +25,7 @@ import hashlib
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -417,6 +418,10 @@ def linkable_files(root: Path):
 
 
 def slugify(title: str) -> str:
+    # Compose first: an NFD title (macOS/Finder names) splits "ó" into "o" plus
+    # a combining mark, which isn't alnum ("reunio-n"), and the NFC and NFD
+    # forms of one title would name the same file on APFS without comparing equal.
+    title = unicodedata.normalize("NFC", title)
     slug = "".join(c.lower() if c.isalnum() else "-" for c in title)
     slug = "-".join(part for part in slug.split("-") if part)
     if len(slug) > 80:

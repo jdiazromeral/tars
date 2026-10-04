@@ -740,8 +740,10 @@ def slack():
 @slack.command("select")
 @click.option("--channel", required=True,
               help="Channel ID being swept (checked against the allowlist).")
-@click.option("--channel-type", default="public_channel", show_default=True,
-              help="public_channel | private_channel | mpim | im.")
+@click.option("--channel-type", required=True,
+              type=click.Choice(["public_channel", "private_channel", "mpim", "im"]),
+              help="The conversation's type, as the MCP reports it. Required: a "
+                   "default would let a DM pass as a public channel.")
 def slack_select(channel: str, channel_type: str):
     """Pick which messages of a fetched window become captured threads.
 

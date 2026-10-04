@@ -96,7 +96,7 @@ def validate_channel(channel_id: str, channel_type: str, cfg: dict) -> None:
     """
     if channel_id not in cfg["channels"]:
         raise RuntimeError(f"{channel_id} is not in the slack.channels allowlist")
-    if channel_type == "im":
+    if channel_type == "im" or channel_id.startswith("D"):  # Slack's 1:1 DM ids are D…
         raise RuntimeError(
             f"{channel_id} is a 1:1 DM — never swept. Capture those deliberately "
             f"with Mode A instead."

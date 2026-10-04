@@ -63,9 +63,19 @@ def load_rules(root: Path) -> list[Rule]:
     return rules
 
 
+# A URL ends at whitespace or at the delimiters that wrap one in markdown or
+# Slack (<url|label>, [label](url)); the capture group keeps it in re.split.
+_URL = re.compile(r"(https?://[^\s<>|)\]]+)")
+
+
 def apply(text: str, rules: list[Rule], connector: str | None = None) -> str:
-    for rule in rules:
-        if rule.connectors is not None and connector not in rule.connectors:
-            continue
-        text = rule.pattern.sub(lambda _m, c=rule.canonical: c, text)
-    return text
+    """Rewrite STT variants to their canonical form — outside URLs only: a
+    variant inside a link's host or path is an address, not a mishearing."""
+    active = [r for r in rules if r.connectors is None or connector in r.connectors]
+    if not active:
+        return text
+    parts = _URL.split(text)
+    for i in range(0, len(parts), 2):  # even parts are prose, odd ones URLs
+        for rule in active:
+            parts[i] = rule.pattern.sub(lambda _m, c=rule.canonical: c, parts[i])
+    return "".join(parts)
