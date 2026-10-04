@@ -548,10 +548,12 @@ def sweep():
     for d in drops:
         if d.status == "skipped":
             click.echo(f"skipped  {d.file}  (not plain text — capture it with `tars add`)")
+        elif d.status == "kept":
+            click.echo(f"kept     {d.file}  left in inbox/: {d.title}")
         elif d.status != "empty":
             click.echo(f"{d.status}  {d.doc_id}  {d.file} → {d.title}")
-    swept = sum(d.status not in ("skipped", "empty") for d in drops)
-    skipped = sum(d.status == "skipped" for d in drops)
+    swept = sum(d.status not in ("skipped", "empty", "kept") for d in drops)
+    skipped = sum(d.status in ("skipped", "kept") for d in drops)
     click.echo(f"swept {swept} file(s)" + (f", {skipped} skipped" if skipped else ""))
 
 
@@ -595,6 +597,10 @@ def normalize():
     changed, unparseable = 0, []
     for content_md in store.iter_raw(root):
         try:
+            # cheap check first: take the write lock only for files that will change
+            doc = store.read_raw(content_md)
+            if normalize_mod.apply(doc.text, rules, doc.connector) == doc.text:
+                continue
             status = ingest.renormalize(root, db, content_md, rules)
         except store.UnparseableRaw as exc:
             unparseable.append((content_md, exc.reason))

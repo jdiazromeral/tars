@@ -25,6 +25,7 @@ class Drop:
     """What sweep did with one inbox file."""
     file: str
     status: str  # added | updated | unchanged | skipped (not text) | empty (cleared)
+    #             | kept (couldn't ingest; left in inbox/, reason in title)
     doc_id: str | None = None
     title: str | None = None
 
@@ -66,7 +67,14 @@ def sweep(root: Path, db: sqlite3.Connection) -> list[Drop]:
             title=title_for(f, text),
             meta={"source": "inbox", "inbox_file": f.name},
         )
-        doc_id, status = ingest.add(root, db, doc)
+        try:
+            doc_id, status = ingest.add(root, db, doc)
+        except ingest.WouldReplace as exc:  # leave it in inbox/: never unlink what wasn't ingested
+            drops.append(Drop(f.name, "kept", title=str(exc)))
+            continue
+        except store.UnparseableRaw as exc:
+            drops.append(Drop(f.name, "kept", title=f"{exc.path.relative_to(root)}: {exc.reason}"))
+            continue
         f.unlink()
         drops.append(Drop(f.name, status, doc_id, doc.title))
     return drops
