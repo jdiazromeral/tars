@@ -29,7 +29,8 @@ Capture two owners:
 
 ## 1. Gather candidates
 
-Identify the source(s). If the user named a meeting/doc, `tars show <doc_id>`;
+Identify the source(s). If the user named a meeting/doc, `tars show <ref>` with their own reference
+(`PROJ-123`, a wiki-link, an origin);
 otherwise `tars search` or read the relevant `raw/` files. Pull every explicit
 commitment or "next step", with its owner and any due date. Meetings usually
 end with a "Próximos pasos / Next steps" block — mine that first.
