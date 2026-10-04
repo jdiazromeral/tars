@@ -38,6 +38,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from .. import syncstate
+
 CONFIG_FILE = "connectors.yml"
 
 #: Subtypes that are channel bookkeeping, never content.
@@ -147,9 +149,12 @@ class SelectionReport:
     selected: list[Selected] = field(default_factory=list)
     #: reason -> count, so a sweep can report what it dropped and why.
     skipped: dict[str, int] = field(default_factory=dict)
-    #: True when `max_threads_per_run` cut the list short: the caller must NOT
-    #: commit its watermark, so the next run resumes instead of skipping.
+    #: True when `max_threads_per_run` cut the list short.
     truncated: bool = False
+    #: When truncated: the last selected thread's exact ts as an ISO watermark.
+    #: The caller sets its cursor here (not the sweep start), so the next run
+    #: resumes right after it — Slack's oldest= is exclusive.
+    resume_from: str | None = None
 
     def _skip(self, reason: str) -> None:
         self.skipped[reason] = self.skipped.get(reason, 0) + 1
@@ -169,13 +174,15 @@ def select(messages: list[dict], cfg: dict) -> SelectionReport:
     """Choose which messages in a fetched window become captured threads.
 
     Pure: no I/O, no MCP, no clock. `messages` is `conversations.history` as
-    the MCP returns it (newest-first or oldest-first, order is irrelevant).
+    the MCP returns it, in either order: they are walked oldest-first, so a
+    run cap keeps the oldest threads and the sweep always makes progress from
+    the old end (newest-first, a capped backlog never reached its oldest).
     """
     report = SelectionReport()
     cap = cfg.get("max_threads_per_run") or 0
     patterns = cfg.get("redundant_link_patterns") or []
 
-    for message in messages:
+    for message in sorted(messages, key=lambda m: float(m.get("ts") or 0)):
         ts = message.get("ts")
         if not ts:
             report._skip("no-ts")
@@ -218,6 +225,8 @@ def select(messages: list[dict], cfg: dict) -> SelectionReport:
                      reply_count=replies, reaction_total=reactions)
         )
 
+    if report.truncated and report.selected:
+        report.resume_from = syncstate.from_slack_ts(report.selected[-1].thread_ts)
     return report
 
 
