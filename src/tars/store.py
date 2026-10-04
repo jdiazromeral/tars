@@ -264,6 +264,8 @@ def write_raw(root: Path, doc: RawDoc, path: Path,
     }
     if doc.annotates:
         frontmatter["annotates"] = _DoubleQuoted(doc.annotates)
+    if "annotates_id" in doc.meta:  # hex; quoted, or YAML 1.2 reads 0361… as a number
+        frontmatter["meta"] = {**doc.meta, "annotates_id": _DoubleQuoted(doc.meta["annotates_id"])}
     header = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
     payload = f"---\n{header}\n---\n\n{render_body(doc)}\n"
     # Raw is truth: leave the file untouched (bytes AND mtime) when nothing changed,
