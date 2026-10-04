@@ -197,6 +197,15 @@ def _file_doc_id(path: Path) -> str | None:
     return None
 
 
+def find_raw(root: Path, connector: str, doc_id: str) -> Path | None:
+    """The raw file carrying DOC_ID, found by reading ids in its connector dir —
+    for when the index has no row (a lost or not-yet-rebuilt tars.db)."""
+    for path in sorted((root / RAW_DIR / slugify(connector)).glob("*.md")):
+        if _file_doc_id(path) == doc_id:
+            return path
+    return None
+
+
 def raw_path_for(root: Path, doc: RawDoc, existing: str | None = None) -> Path:
     """Pick the raw file path. `existing` (relative path from the DB) wins so
     a document's filename — and every link to it — stays stable forever."""

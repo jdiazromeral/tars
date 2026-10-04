@@ -135,10 +135,10 @@ annotations (new notes that point at it), never edits to it.
   passed unconverted to JQL / Gmail `after:` / Slack `oldest=`.
 - [x] **E. Re-add drops metadata** — `--append` without `--title` nulls the
   title and wipes tags; a title-only change reports `unchanged`; `--append`
-  to a missing slot silently creates a doc. Fixed: append keeps title, merges
-  tags and meta; a missing slot fails unless `--create`. **Still open:** an
-  explicit `--title` with unchanged text reports `unchanged` (can't tell it
-  from an extracted title without plumbing).
+  to a missing slot silently creates a doc. Fixed: `add` decides against the
+  raw file (found by id when the index has no row): append keeps the title and
+  merges tags and meta; a new title on the same text is an update (except a
+  content-addressed re-drop); a missing slot fails unless `--create`.
 - [x] **F. `tag`/`untag`/`normalize` read outside the lock** — a concurrent
   `--append` (track) between their read and write is lost (2 reviewers).
   Fixed: `tag`/`untag` (`ingest.shelve`) and `normalize` (`ingest.renormalize`)

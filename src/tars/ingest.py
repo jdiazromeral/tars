@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -101,7 +101,7 @@ class NoSuchDocument(Exception):
 
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
-        append: bool = False, create: bool = True) -> tuple[str, str]:
+        append: bool = False, create: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
 
     Adds never replace authored text: for a connector in AUTHORED_CONNECTORS,
@@ -145,53 +145,31 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
 
     db.execute("BEGIN IMMEDIATE")
     try:
-        existing = db.execute(
-            "SELECT content_hash, raw_dir, concepts, title FROM documents WHERE id = ?",
-            (doc.id,),
+        row = db.execute(
+            "SELECT content_hash, raw_dir, concepts FROM documents WHERE id = ?", (doc.id,)
         ).fetchone()
-        if append and not existing and not create:
+        # Decide against the raw file, never the index: the index only says where
+        # the file is, and it can be stale (a hand-edit) or missing (a lost tars.db).
+        stored_path = ((root / row["raw_dir"]) if row
+                       else store.find_raw(root, doc.connector, doc.id))
+        stored = store.read_raw(stored_path) if stored_path and stored_path.exists() else None
+        if append and stored is None and not create:
             raise NoSuchDocument(f"no document at {doc.origin}")
-        if existing and doc.title is None:
-            doc.title = existing["title"]
-        # The raw file, not the index, is what an add must not lose: the index
-        # can be stale (a hand-edit before finalize), so compare against the file.
-        stored_doc = None
-        if existing and (append or doc.connector in AUTHORED_CONNECTORS):
-            stored_doc = store.read_raw(root / existing["raw_dir"])
-        if stored_doc is not None and append:
-            previous = stored_doc.text
-            # A retried append (the command ran, the caller never saw the output)
-            # must not duplicate its lines; matching whole trailing lines keeps it
-            # a no-op without swallowing a fragment that merely ends a longer line.
-            if previous != doc.text and not previous.endswith(f"\n{doc.text}"):
-                doc.text = f"{previous}\n{doc.text}".strip("\n")
-            else:
-                doc.text = previous
-            doc.tags = list(dict.fromkeys(stored_doc.tags + doc.tags))
-            doc.meta = {**stored_doc.meta, **doc.meta}
-        elif stored_doc is not None and doc.text != stored_doc.text:
-            # Authored text only grows. A difference that is only a vocab rule
-            # added since keeps the stored words — rewriting them is normalize's job.
-            if rules and normalize.apply(stored_doc.text, rules, doc.connector) == doc.text:
-                doc.text = stored_doc.text
-            else:
-                raise WouldReplace(f"{doc.origin} already holds different text")
+        if stored is not None:
+            _merge_stored(doc, stored, append=append, rules=rules)
         digest = store.content_hash(doc.text)
-        if existing:
-            stored = json.loads(existing["concepts"] or "[]")
-            doc.concepts = list(dict.fromkeys(stored + doc.concepts))
-        unchanged = bool(existing and existing["content_hash"] == digest
-                         and json.loads(existing["concepts"] or "[]") == doc.concepts)
-        if unchanged and append and stored_doc is not None:
-            # a retried append may still carry a new title, tag or meta
-            unchanged = (doc.title, doc.tags, doc.meta) == (
-                stored_doc.title, stored_doc.tags, stored_doc.meta)
-        if unchanged:
-            db.rollback()
+
+        if stored is not None and _same(doc, stored):
+            assert stored_path is not None
+            raw_dir = str(stored_path.relative_to(root))
+            if not (row and row["content_hash"] == digest and row["raw_dir"] == raw_dir
+                    and json.loads(row["concepts"] or "[]") == doc.concepts):
+                index_doc(db, doc, digest, raw_dir)  # catch a stale index up; raw untouched
+            db.commit()
             return doc.id, "unchanged"
 
-        path = store.raw_path_for(root, doc, existing["raw_dir"] if existing else None)
-        status = "updated" if existing else "added"
+        path = stored_path or store.raw_path_for(root, doc)
+        status = "updated" if (stored is not None or row) else "added"
         ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
                                 connector=doc.connector, origin=doc.origin, title=doc.title)
         raw_path = store.write_raw(root, doc, path, source_bytes, source_ext)
@@ -203,64 +181,121 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     return doc.id, status
 
 
-def shelve(root: Path, db: sqlite3.Connection, doc_id: str,
-           add_concepts: Sequence[str] = (),
-           remove_concepts: Sequence[str] = ()) -> tuple[str, list[str]]:
-    """Add and/or remove concepts on one document — shelving, never content.
+# `note:<hash>` / `file:<hash>`: the origin is a hash of the captured content,
+# so the same origin means the same words or bytes, whatever vocab did since.
+_CONTENT_ADDRESSED = re.compile(r"^(note|file):[0-9a-f]{12}$")
 
-    The raw file is read *inside* the write lock and its text written back as
-    read, so an append landing concurrently can't be overwritten by a stale
-    snapshot (tag/untag used to read outside the lock and re-add the whole
-    document). Returns ("updated" | "unchanged", the resulting concepts).
+
+def _merge_stored(doc: RawDoc, stored: RawDoc, *, append: bool,
+                  rules: list[normalize.Rule]) -> None:
+    """Fold the stored document (read from its raw file) into the incoming one.
+
+    Shelving only grows (concepts union) and a title the caller doesn't restate
+    is kept. An append joins the text and merges tags and meta. Authored text
+    only grows: a re-add with different text raises WouldReplace, unless the
+    origin is content-addressed (same origin, same words) or the difference is
+    only a vocab rule added since — then the stored words win. A synced source
+    replaces text, tags and meta: the source owns them.
+    """
+    doc.concepts = list(dict.fromkeys(stored.concepts + doc.concepts))
+    addressed = bool(_CONTENT_ADDRESSED.match(doc.origin))
+    if doc.title is None or addressed:
+        doc.title = stored.title or doc.title  # a re-drop under a new filename isn't a rename
+    if append:
+        # A retried append (the command ran, the caller never saw the output)
+        # must not duplicate its lines; matching whole trailing lines keeps it
+        # a no-op without swallowing a fragment that merely ends a longer line.
+        if stored.text != doc.text and not stored.text.endswith(f"\n{doc.text}"):
+            doc.text = f"{stored.text}\n{doc.text}".strip("\n")
+        else:
+            doc.text = stored.text
+    elif doc.connector in AUTHORED_CONNECTORS or addressed:
+        if doc.text != stored.text:
+            renormalized = normalize.apply(stored.text, rules, doc.connector) if rules else None
+            vocab_only = renormalized == doc.text
+            if not (addressed or vocab_only):
+                raise WouldReplace(f"{doc.origin} already holds different text")
+            doc.text = stored.text
+    if append or doc.connector in AUTHORED_CONNECTORS:
+        doc.tags = list(dict.fromkeys(stored.tags + doc.tags))
+        # the same capture re-dropped keeps its original provenance (inbox_file...)
+        doc.meta = {**doc.meta, **stored.meta} if addressed else {**stored.meta, **doc.meta}
+
+
+def _same(doc: RawDoc, stored: RawDoc) -> bool:
+    """Nothing to write. Meta counts only where it's merged (authored text): a
+    synced source's meta can carry volatile fields that would churn every sync."""
+    fields = (doc.text, doc.title, doc.tags, doc.concepts)
+    if fields != (stored.text, stored.title, stored.tags, stored.concepts):
+        return False
+    return doc.connector not in AUTHORED_CONNECTORS or doc.meta == stored.meta
+
+
+def _rewrite_locked(root: Path, db: sqlite3.Connection, locate: Callable[[], Path],
+                    change: Callable[[RawDoc], bool]) -> tuple[bool, RawDoc]:
+    """Read one raw file, change it, write it back and reindex — all under one
+    write lock, so a concurrent append can't be overwritten by a stale snapshot.
+
+    `locate` runs inside the lock and returns the file; `change` edits the doc
+    in place and returns whether anything changed (False: nothing is written).
+    The shared protocol behind `shelve` and `renormalize`.
     """
     db.execute("BEGIN IMMEDIATE")
     try:
-        row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
-        if row is None:
-            raise NoSuchDocument(f"no document with id {doc_id}")
-        path = root / row["raw_dir"]
+        path = locate()
         doc = store.read_raw(path)
-        dropped = set(remove_concepts)
-        concepts = [c for c in dict.fromkeys([*doc.concepts, *add_concepts])
-                    if c not in dropped]
-        if concepts == doc.concepts:
+        if not change(doc):
             db.rollback()
-            return "unchanged", concepts
-        doc.concepts = concepts
+            return False, doc
         ingestlog.log_ingestion(root, action="updated", doc_id=doc.id,
                                 connector=doc.connector, origin=doc.origin, title=doc.title)
         store.write_raw(root, doc, path)
-        index_doc(db, doc, store.content_hash(doc.text), row["raw_dir"])
+        index_doc(db, doc, store.content_hash(doc.text), str(path.relative_to(root)))
         db.commit()
     except BaseException:
         db.rollback()
         raise
-    return "updated", concepts
+    return True, doc
+
+
+def shelve(root: Path, db: sqlite3.Connection, doc_id: str,
+           add_concepts: Sequence[str] = (),
+           remove_concepts: Sequence[str] = ()) -> tuple[str, list[str]]:
+    """Add and/or remove concepts on one document — shelving, never content.
+    Returns ("updated" | "unchanged", the resulting concepts)."""
+    def locate() -> Path:
+        row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        if row is None:
+            raise NoSuchDocument(f"no document with id {doc_id}")
+        return root / row["raw_dir"]
+
+    dropped = set(remove_concepts)
+
+    def change(doc: RawDoc) -> bool:
+        concepts = [c for c in dict.fromkeys([*doc.concepts, *add_concepts])
+                    if c not in dropped]
+        if concepts == doc.concepts:
+            return False
+        doc.concepts = concepts
+        return True
+
+    changed, doc = _rewrite_locked(root, db, locate, change)
+    return ("updated" if changed else "unchanged"), doc.concepts
 
 
 def renormalize(root: Path, db: sqlite3.Connection, raw_path: Path,
                 rules: list[normalize.Rule]) -> str:
     """Apply vocab rules to one raw file: the one sanctioned rewrite of
-    authored text. Read, rewrite and reindex under one write lock (as in
-    `shelve`), so an append landing concurrently can't be overwritten by a
-    stale snapshot. Returns "updated" or "unchanged"."""
-    db.execute("BEGIN IMMEDIATE")
-    try:
-        doc = store.read_raw(raw_path)
+    authored text. Returns "updated" or "unchanged"."""
+    def change(doc: RawDoc) -> bool:
         text = normalize.apply(doc.text, rules, doc.connector)
         if text == doc.text:
-            db.rollback()
-            return "unchanged"
+            return False
         doc.text = text
-        ingestlog.log_ingestion(root, action="updated", doc_id=doc.id,
-                                connector=doc.connector, origin=doc.origin, title=doc.title)
-        store.write_raw(root, doc, raw_path)
-        index_doc(db, doc, store.content_hash(text), str(raw_path.relative_to(root)))
-        db.commit()
-    except BaseException:
-        db.rollback()
-        raise
-    return "updated"
+        return True
+
+    changed, _ = _rewrite_locked(root, db, lambda: raw_path, change)
+    return "updated" if changed else "unchanged"
 
 
 def index_doc(db: sqlite3.Connection, doc: RawDoc, digest: str, raw_dir: str) -> None:

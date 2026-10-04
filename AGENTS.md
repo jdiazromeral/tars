@@ -56,7 +56,11 @@ tars.db                           disposable index — tars reindex rebuilds it
   add to it with `--append` (which keeps the title and tags it doesn't
   restate), or capture a new note. `--append` to an origin that holds nothing
   fails unless `--create` (track's first entry of the day). Only `tars
-  normalize` may rewrite authored text, as a sanctioned vocab fix.
+  normalize` may rewrite authored text, as a sanctioned vocab fix. Every
+  decision is made against the raw file, read under the write lock — the
+  index only locates it, and may be stale or missing. A content-addressed
+  origin (`note:<hash>`, `file:<hash>`) *is* its text: re-adding it never
+  changes the stored words, title or provenance.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
   after ingest (comments, status, state). The incremental watermark only
   *discovers* changes for items in scope (e.g. assigned to me); an item pulled

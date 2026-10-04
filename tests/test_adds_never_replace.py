@@ -223,3 +223,92 @@ def test_normalize_never_overwrites_a_concurrent_append(root, monkeypatch):
 
     assert store.read_raw(path / "raw/activity/d1.md").text.splitlines() == [
         "- met Acne", "- entry two"]
+
+
+# --- second review of #12: decide against the raw file, never the index ---
+
+def test_append_without_an_index_row_keeps_the_day(root):
+    # tars.db is a disposable cache: with it gone, an append must still find
+    # the day's raw file (by id) instead of starting it over.
+    path, runner = root
+    for line in ("- one", "- two"):
+        add(runner, line, "--append", "--create", "--connector", "activity",
+            "--origin", "activity:d", "--title", "d")
+    for db_file in path.glob("tars.db*"):
+        db_file.unlink()
+
+    result = add(runner, "- three", "--append", "--create", "--connector", "activity",
+                 "--origin", "activity:d", "--title", "d")
+    assert result.output.startswith("updated"), result.output
+    assert store.read_raw(path / "raw/activity/d.md").text == "- one\n- two\n- three"
+
+
+def test_readd_without_an_index_row_is_still_refused(root):
+    path, runner = root
+    add(runner, "my words", "--origin", "note:slot", "--title", "slot")
+    for db_file in path.glob("tars.db*"):
+        db_file.unlink()
+
+    assert add(runner, "other words", "--origin", "note:slot", "--title", "slot").exit_code != 0
+    assert store.read_raw(path / "raw/note/slot.md").text == "my words"
+
+
+def test_sweep_skips_a_drop_it_cannot_ingest_and_keeps_going(root):
+    path, runner = root
+    add(runner, "drop text", "--title", "drop")
+    raw = path / "raw/note/drop.md"
+    raw.write_text(raw.read_text().replace("tags: []", "tags: [oops"))
+    (path / "inbox/a.txt").write_text("drop text")
+    (path / "inbox/b.txt").write_text("other text")
+
+    result = runner.invoke(main, ["sweep"])
+    assert result.exception is None or isinstance(result.exception, SystemExit), result.output
+    assert "a.txt" in result.output
+    assert (path / "inbox/a.txt").exists()          # kept, not lost
+    assert not (path / "inbox/b.txt").exists()      # the rest still swept
+
+
+def test_same_words_with_a_narrowed_vocab_rule_are_unchanged(root):
+    # A content-addressed origin *is* the text: the same origin means the same
+    # words, whatever vocab did to the stored copy since.
+    path, runner = root
+    (path / "vocab.yml").write_text("Acme:\n  variants: [acne]\n")
+    add(runner, "we use acne", "--title", "acme")
+    (path / "vocab.yml").write_text("Acme:\n  variants: [acne]\n  connectors: [granola]\n")
+
+    result = add(runner, "we use acne", "--title", "acme")
+    assert result.output.startswith("unchanged"), result.output
+
+
+def test_append_keeps_a_raw_title_and_concepts_the_index_lags_behind(root):
+    path, runner = root
+    add(runner, "- one", "--append", "--create", "--connector", "activity",
+        "--origin", "activity:d", "--title", "d", "--concept", "auth")
+    raw = path / "raw/activity/d.md"
+    raw.write_text(raw.read_text().replace("title: d\n", "title: Renamed\n")
+                   .replace("- auth\n", "- auth\n- billing\n"))  # index not reindexed
+
+    add(runner, "- two", "--append", "--connector", "activity", "--origin", "activity:d")
+    doc = store.read_raw(raw)
+    assert doc.title == "Renamed"
+    assert doc.concepts == ["auth", "billing"]
+
+
+def test_readd_of_the_same_words_keeps_tags_and_takes_a_new_title(root):
+    path, runner = root
+    add(runner, "same", "--origin", "note:x", "--title", "Old", "--tag", "t1")
+
+    result = add(runner, "same", "--origin", "note:x", "--title", "New", "--concept", "foo")
+    assert result.output.startswith("updated"), result.output
+    doc = store.read_raw(path / "raw/note/old.md")
+    assert (doc.title, doc.tags, doc.concepts) == ("New", ["t1"], ["foo"])
+
+
+def test_api_append_defaults_to_not_creating(root):
+    from tars import db as database
+    from tars import ingest
+
+    path, _ = root
+    with pytest.raises(ingest.NoSuchDocument):
+        ingest.add(path, database.connect(path),
+                   store.RawDoc(connector="note", origin="note:typo", text="x"), append=True)
