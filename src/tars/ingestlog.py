@@ -24,7 +24,7 @@ def log_ingestion(root: Path, *, action: str, doc_id: str, connector: str,
                   origin: str, title: str | None = None) -> None:
     """Append one event to the append-only ingestion log. Called for real
     ingestions only (add / update / delete) — never for `unchanged` or for a
-    cache rebuild (`reindex` passes `log=False` to `ingest.add`)."""
+    cache rebuild (`reindex` indexes without going through `ingest.add`)."""
     log_path = root / store.INGEST_LOG
     log_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {"ts": store.now_iso(), "action": action, "id": doc_id,

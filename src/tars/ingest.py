@@ -85,13 +85,8 @@ def chunk_text(text: str, target: int = CHUNK_TARGET) -> list[str]:
 
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
-        raw_dir: str | None = None, concepts_mode: str = "merge",
-        log: bool = True, append: bool = False) -> tuple[str, str]:
+        concepts_mode: str = "merge", append: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
-
-    `raw_dir` pins the raw file location when the DB has no row to remember it
-    (reindex reads docs *from* their raw files) — a filename is fixed at first
-    ingest and must never move, even across an index rebuild.
 
     Concepts are shelving state, not content: by default (`concepts_mode="merge"`)
     a re-ingest unions the incoming concepts with the stored ones, so a re-sync
@@ -147,11 +142,10 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
             db.rollback()
             return doc.id, "unchanged"
 
-        path = store.raw_path_for(root, doc, existing["raw_dir"] if existing else raw_dir)
+        path = store.raw_path_for(root, doc, existing["raw_dir"] if existing else None)
         status = "updated" if existing else "added"
-        if log:  # append-only history, written first; a cache rebuild passes log=False
-            ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
-                                    connector=doc.connector, origin=doc.origin, title=doc.title)
+        ingestlog.log_ingestion(root, action=status, doc_id=doc.id,
+                                connector=doc.connector, origin=doc.origin, title=doc.title)
         raw_path = store.write_raw(root, doc, path, source_bytes, source_ext)
         index_doc(db, doc, digest, str(raw_path.relative_to(root)))
         db.commit()
@@ -224,27 +218,34 @@ def reindex(root: Path, db: sqlite3.Connection) -> tuple[int, list[tuple[Path, s
     job), so a rebuild can't drop a byte. Not an ingestion event either, so
     nothing is logged.
 
-    The rebuild is one transaction: readers keep the old index until it
-    commits, and a crash halfway rolls back to it instead of leaving a
-    half-empty cache. A file that doesn't parse is skipped and returned with
-    the reason, so one bad file can't take the other documents down with it.
+    Every file is parsed first, outside the write lock, so concurrent writers
+    wait only for the DB writes. Those run in one transaction: readers keep
+    the old index until it commits, and a crash rolls back to it.
+
+    A file that doesn't parse is skipped and returned with the reason, and
+    its existing index row is *kept*: dropping it would make the next
+    `add --append` or re-sync of that origin see no document and overwrite
+    the file. The row is replaced once the file parses again.
     Returns (documents indexed, [(unparseable path, reason)]).
     """
-    count, unparseable = 0, []
+    docs: list[tuple[RawDoc, str]] = []
+    unparseable: list[tuple[Path, str]] = []
+    for content_md in store.iter_raw(root):
+        try:
+            docs.append((store.read_raw(content_md), str(content_md.relative_to(root))))
+        except store.UnparseableRaw as exc:
+            unparseable.append((content_md, exc.reason))
+    keep = {str(path.relative_to(root)) for path, _ in unparseable}
+
     db.execute("BEGIN IMMEDIATE")
     try:
-        db.execute("DELETE FROM documents")
-        for content_md in store.iter_raw(root):
-            try:
-                doc = store.read_raw(content_md)
-            except ValueError as exc:
-                unparseable.append((content_md, str(exc).removeprefix(f"{content_md}: ")))
-                continue
-            index_doc(db, doc, store.content_hash(doc.text),
-                      str(content_md.relative_to(root)))
-            count += 1
+        stale = [(row["id"],) for row in db.execute("SELECT id, raw_dir FROM documents")
+                 if row["raw_dir"] not in keep]
+        db.executemany("DELETE FROM documents WHERE id = ?", stale)
+        for doc, raw_dir in docs:
+            index_doc(db, doc, store.content_hash(doc.text), raw_dir)
         db.commit()
     except BaseException:
         db.rollback()
         raise
-    return count, unparseable
+    return len(docs), unparseable
