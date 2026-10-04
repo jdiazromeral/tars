@@ -234,8 +234,8 @@ def write_raw(root: Path, doc: RawDoc, path: Path,
     payload = f"---\n{header}\n---\n\n{render_body(doc)}\n"
     # Raw is truth: leave the file untouched (bytes AND mtime) when nothing changed,
     # so an index rebuild can never churn the archive. Written via temp file +
-    # atomic rename so a concurrent reader (e.g. `tars tag` reading the raw file
-    # before its own ingest.add) can never observe a half-written file.
+    # atomic rename so a concurrent reader (another `tars` process, Obsidian)
+    # can never observe a half-written file.
     if not path.exists() or path.read_text() != payload:
         fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
         try:

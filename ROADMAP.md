@@ -125,17 +125,25 @@ annotations (new notes that point at it), never edits to it.
   dropped unknown frontmatter keys, committed the DELETE first, and one bad
   file crashed it (and doctor/finalize) midway. Fixed: read-only, one
   transaction, unparseable files skipped and reported (`unparseable-raw`).
-- [ ] **C. `capture` overwrites living notes, agent worklogs and excerpts** —
+- [x] **C. `capture` overwrites living notes, agent worklogs and excerpts** —
   the skill never mentions `--append`; same-slot re-adds replace silently.
+  Fixed: authored text (note/agent/activity) only grows — a re-add with
+  different text is refused; capture appends and slots excerpts by `<url>#<slug>`.
 - [ ] **D. Sync windows that lose items** — `sync-granola` advances with
   `--set` even after skipping meetings; the Slack cap keeps the newest
   threads so a backlog never reaches the oldest. Plausible: ISO watermarks
   passed unconverted to JQL / Gmail `after:` / Slack `oldest=`.
-- [ ] **E. Re-add drops metadata** — `--append` without `--title` nulls the
+- [x] **E. Re-add drops metadata** — `--append` without `--title` nulls the
   title and wipes tags; a title-only change reports `unchanged`; `--append`
-  to a missing slot silently creates a doc.
-- [ ] **F. `tag`/`untag`/`normalize` read outside the lock** — a concurrent
+  to a missing slot silently creates a doc. Fixed: append keeps title, merges
+  tags and meta; a missing slot fails unless `--create`. **Still open:** an
+  explicit `--title` with unchanged text reports `unchanged` (can't tell it
+  from an extracted title without plumbing).
+- [x] **F. `tag`/`untag`/`normalize` read outside the lock** — a concurrent
   `--append` (track) between their read and write is lost (2 reviewers).
+  Fixed for tag/untag (`ingest.shelve` reads inside the lock). **Still open:**
+  `normalize` reads outside the lock and rewrites with `replace=True`, so an
+  append racing a manual `tars normalize` can still be lost.
 - [ ] **G. Hostile titles** — a newline in a title injects headings/links into
   hubs (growing every `tars hubs`, doctor clean); `promote` writes invalid
   YAML for `: ` titles and can mint a stem that collides with a raw doc.

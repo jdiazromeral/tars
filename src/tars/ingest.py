@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -100,7 +101,7 @@ class NoSuchDocument(Exception):
 
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
-        concepts_mode: str = "merge", append: bool = False, create: bool = True,
+        append: bool = False, create: bool = True,
         replace: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
 
@@ -109,17 +110,17 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     unless `replace=True` (only `tars normalize`, a sanctioned rewrite, passes
     it). A re-add that doesn't restate the title (None) keeps the stored one.
 
-    Concepts are shelving state, not content: by default (`concepts_mode="merge"`)
-    a re-ingest unions the incoming concepts with the stored ones, so a re-sync
-    can add shelving but never remove it — only an explicit `untag` (which passes
-    "replace") takes concepts away. The content hash covers `doc.text` alone, so
-    a shelving change never masquerades as a content change.
+    Concepts are shelving state, not content: a re-ingest unions the incoming
+    concepts with the stored ones, so a re-sync can add shelving but never
+    remove it — only `shelve` (tars untag) takes concepts away. The content hash
+    covers `doc.text` alone, so a shelving change never masquerades as a
+    content change.
 
     The read of the existing row, the merge, and the write all happen inside one
     BEGIN IMMEDIATE transaction: it takes SQLite's write lock before the read, so
-    two concurrent `add` calls on the same doc (e.g. two `tars tag` invocations
-    racing) can't both read the same stale `concepts` and have the second one's
-    write silently clobber the first one's merge.
+    two concurrent `add` calls on the same doc (e.g. two syncs racing) can't both
+    read the same stale `concepts` and have the second one's write silently
+    clobber the first one's merge.
 
     `append=True` makes `doc.text` an addition to the stored text instead of a
     replacement: the existing raw text is read inside that same transaction and
@@ -133,8 +134,6 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     The ingestion event is logged before the raw write (see `ingestlog`) and
     inside the write lock, so the log's order matches the commit order.
     """
-    if concepts_mode not in ("merge", "replace"):
-        raise ValueError(f"concepts_mode must be merge or replace, got {concepts_mode!r}")
     # Canonicalize: read_raw strips outer newlines, so text must be hashed in
     # that same form or a connector passing a trailing "\n" (github did) makes
     # every stored hash stale on re-read — permanent db-drift + upsert churn.
@@ -170,7 +169,7 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
                 and doc.connector in AUTHORED_CONNECTORS
                 and existing["content_hash"] != digest):
             raise WouldReplace(f"{doc.origin} already holds different text")
-        if existing and concepts_mode == "merge":
+        if existing:
             stored = json.loads(existing["concepts"] or "[]")
             doc.concepts = list(dict.fromkeys(stored + doc.concepts))
         if (existing and existing["content_hash"] == digest
@@ -189,6 +188,39 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         db.rollback()
         raise
     return doc.id, status
+
+
+def shelve(root: Path, db: sqlite3.Connection, doc_id: str,
+           add: Sequence[str] = (), remove: Sequence[str] = ()) -> tuple[str, list[str]]:
+    """Add and/or remove concepts on one document — shelving, never content.
+
+    The raw file is read *inside* the write lock and its text written back as
+    read, so an append landing concurrently can't be overwritten by a stale
+    snapshot (tag/untag used to read outside the lock and re-add the whole
+    document). Returns ("updated" | "unchanged", the resulting concepts).
+    """
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        row = db.execute("SELECT raw_dir FROM documents WHERE id = ?", (doc_id,)).fetchone()
+        if row is None:
+            raise NoSuchDocument(f"no document with id {doc_id}")
+        path = root / row["raw_dir"]
+        doc = store.read_raw(path)
+        dropped = set(remove)
+        concepts = [c for c in dict.fromkeys([*doc.concepts, *add]) if c not in dropped]
+        if concepts == doc.concepts:
+            db.rollback()
+            return "unchanged", concepts
+        doc.concepts = concepts
+        ingestlog.log_ingestion(root, action="updated", doc_id=doc.id,
+                                connector=doc.connector, origin=doc.origin, title=doc.title)
+        store.write_raw(root, doc, path)
+        index_doc(db, doc, store.content_hash(doc.text), row["raw_dir"])
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
+    return "updated", concepts
 
 
 def index_doc(db: sqlite3.Connection, doc: RawDoc, digest: str, raw_dir: str) -> None:

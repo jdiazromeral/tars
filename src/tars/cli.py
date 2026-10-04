@@ -234,11 +234,8 @@ def list_(connector: str | None, since: str | None, as_json: bool):
 def tag(doc_id: str, concepts: tuple[str, ...]):
     """Attach concept wiki-links to an already-captured document (idempotent merge)."""
     root, db = _open()
-    row = _doc_row(db, doc_id)
-    doc = store.read_raw(root / row["raw_dir"])
-    doc.concepts = [store.slugify(c) for c in concepts]
-    _, status = ingest.add(root, db, doc)  # default merge unions with stored concepts
-    merged = store.read_raw(root / row["raw_dir"]).concepts
+    _doc_row(db, doc_id)
+    status, merged = _shelve(root, db, doc_id, add=[store.slugify(c) for c in concepts])
     click.echo(f"{status}  {doc_id}  concepts: {', '.join(merged)}")
 
 
@@ -249,12 +246,16 @@ def tag(doc_id: str, concepts: tuple[str, ...]):
 def untag(doc_id: str, concepts: tuple[str, ...]):
     """Remove concept wiki-links from a document (idempotent; the inverse of tag)."""
     root, db = _open()
-    row = _doc_row(db, doc_id)
-    doc = store.read_raw(root / row["raw_dir"])
-    remove = {store.slugify(c) for c in concepts}
-    doc.concepts = [slug for slug in doc.concepts if slug not in remove]
-    _, status = ingest.add(root, db, doc, concepts_mode="replace")
-    click.echo(f"{status}  {doc_id}  concepts: {', '.join(doc.concepts) or '(none)'}")
+    _doc_row(db, doc_id)
+    status, left = _shelve(root, db, doc_id, remove=[store.slugify(c) for c in concepts])
+    click.echo(f"{status}  {doc_id}  concepts: {', '.join(left) or '(none)'}")
+
+
+def _shelve(root, db, doc_id: str, **change):
+    try:
+        return ingest.shelve(root, db, doc_id, **change)
+    except store.UnparseableRaw as exc:
+        raise click.ClickException(f"{exc} — repair it before shelving this document")
 
 
 @main.command()
