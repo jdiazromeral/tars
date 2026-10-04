@@ -209,9 +209,10 @@ properties — keep them straight:
   `tars:capture`) and available from any directory once installed — they
   resolve the vault through `TARS_HOME`, same as the CLI.
 - Conventional Commits.
-- CLI usage: `tars add <url|file|-> [--append [--create]]` (`--append` adds the
-  text to the end of the existing document for `--origin`, read and write under
-  one DB lock; fails if none exists unless `--create`), `tars sweep`, `tars tag|untag <doc_id>
+- CLI usage: `tars add <url|file|->`, `tars add - --append [--create]`
+  (`--append` adds stdin text to the end of the existing document for
+  `--origin`, read and write under one DB lock; fails if none exists unless
+  `--create`), `tars sweep`, `tars tag|untag <doc_id>
   --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
   `tars show <doc_id> [--path | --head N | --grep <regex> [-C N]]` (token-frugal

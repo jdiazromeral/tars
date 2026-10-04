@@ -140,3 +140,86 @@ def test_shelving_never_overwrites_a_concurrent_append(root, monkeypatch, comman
     doc = store.read_raw(path / "raw/activity/d1.md")
     assert doc.text.splitlines() == ["- entry one", "- entry two"]
     assert doc.concepts == ([] if command == "untag" else ["keep", "x"])
+
+
+def test_the_guard_checks_the_raw_file_not_the_index(root):
+    # The index can be stale (a hand-edit before finalize); comparing against it
+    # let a re-add of the old text, with a new concept, overwrite the edit.
+    path, runner = root
+    add(runner, "line A", "--origin", "note:n", "--title", "n")
+    raw = path / "raw/note/n.md"
+    raw.write_text(raw.read_text().rstrip("\n") + "\nline B\n")
+
+    result = add(runner, "line A", "--origin", "note:n", "--title", "n", "--concept", "foo")
+    assert result.exit_code != 0
+    assert store.read_raw(raw).text == "line A\nline B"
+
+
+def test_a_vocab_rule_added_later_does_not_refuse_the_same_words(root):
+    # The stored words win; applying the new rule is `tars normalize`'s job.
+    path, runner = root
+    add(runner, "hello Acneson world", "--origin", "note:v", "--title", "v")
+    (path / "vocab.yml").write_text("Acne:\n  variants: [Acneson]\n")
+
+    result = add(runner, "hello Acneson world", "--origin", "note:v", "--title", "v")
+    assert result.exit_code == 0, result.output
+    assert store.read_raw(path / "raw/note/v.md").text == "hello Acneson world"
+
+
+def test_a_retried_append_still_records_a_new_tag(root):
+    path, runner = root
+    add(runner, "x", "--append", "--create", "--origin", "note:z", "--title", "z")
+
+    result = add(runner, "x", "--append", "--origin", "note:z", "--tag", "new")
+    assert result.output.startswith("updated"), result.output
+    assert store.read_raw(path / "raw/note/z.md").tags == ["new"]
+
+
+def test_append_takes_text_on_stdin_only(root, tmp_path):
+    # Appending a file or URL replaced the stored title and source sidecar.
+    _, runner = root
+    other = tmp_path / "notes2.md"
+    other.write_text("file body")
+    result = runner.invoke(main, ["add", str(other), "--append", "--origin", "note:z"])
+    assert result.exit_code != 0
+    assert "stdin" in result.output
+
+
+def test_normalize_never_overwrites_a_concurrent_append(root, monkeypatch):
+    # normalize read each file outside the lock, then rewrote it: an append
+    # landing in between was lost. Replay that interleaving.
+    import threading
+
+    from tars import db as database
+    from tars import ingest
+
+    path, runner = root
+    add(runner, "- met Acneson", "--append", "--create", "--connector", "activity",
+        "--origin", "activity:d1", "--title", "d1")
+    (path / "vocab.yml").write_text("Acne:\n  variants: [Acneson]\n")
+
+    def append_entry():
+        conn = database.connect(path)
+        ingest.add(path, conn, store.RawDoc(connector="activity", origin="activity:d1",
+                                            text="- entry two"), append=True, create=False)
+        conn.close()
+
+    real_read = store.read_raw
+    racers = []
+
+    def read_then_race(p, *args, **kwargs):
+        doc = real_read(p, *args, **kwargs)
+        if not racers:
+            racers.append(threading.Thread(target=append_entry))
+            racers[0].start()
+            racers[0].join(timeout=1)
+        return doc
+
+    monkeypatch.setattr(store, "read_raw", read_then_race)
+    result = runner.invoke(main, ["normalize"])
+    assert result.exit_code == 0, (result.output, repr(result.exception))
+    racers[0].join(timeout=15)
+    monkeypatch.undo()
+
+    assert store.read_raw(path / "raw/activity/d1.md").text.splitlines() == [
+        "- met Acne", "- entry two"]

@@ -141,9 +141,8 @@ annotations (new notes that point at it), never edits to it.
   from an extracted title without plumbing).
 - [x] **F. `tag`/`untag`/`normalize` read outside the lock** — a concurrent
   `--append` (track) between their read and write is lost (2 reviewers).
-  Fixed for tag/untag (`ingest.shelve` reads inside the lock). **Still open:**
-  `normalize` reads outside the lock and rewrites with `replace=True`, so an
-  append racing a manual `tars normalize` can still be lost.
+  Fixed: `tag`/`untag` (`ingest.shelve`) and `normalize` (`ingest.renormalize`)
+  read, edit and write under one lock; nothing bypasses the authored-text guard.
 - [ ] **G. Hostile titles** — a newline in a title injects headings/links into
   hubs (growing every `tars hubs`, doctor clean); `promote` writes invalid
   YAML for `: ` titles and can mint a stem that collides with a raw doc.
