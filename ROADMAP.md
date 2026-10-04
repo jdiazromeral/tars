@@ -147,11 +147,16 @@ annotations (new notes that point at it), never edits to it.
   `--append` (track) between their read and write is lost (2 reviewers).
   Fixed: `tag`/`untag` (`ingest.shelve`) and `normalize` (`ingest.renormalize`)
   read, edit and write under one lock; nothing bypasses the authored-text guard.
-- [ ] **G. Hostile titles** — a newline in a title injects headings/links into
+- [x] **G. Hostile titles** — a newline in a title injects headings/links into
   hubs (growing every `tars hubs`, doctor clean); `promote` writes invalid
   YAML for `: ` titles and can mint a stem that collides with a raw doc.
-- [ ] **H. What `rm` doesn't erase** — free pages of tars.db, the log (title,
+  Fixed: hub and promote labels go through `store.link_label`; promote
+  writes YAML with the raw files' dumper and refuses a stem another file owns.
+- [x] **H. What `rm` doesn't erase** — free pages of tars.db, the log (title,
   origin), hubs, vault git history, backups. `rm` only mentions links.
+  Fixed: rm deletes with secure_delete, optimizes FTS, vacuums and truncates
+  the WAL, and names what it can't erase (the log's title/origin, git
+  history, backups). The log stays append-only by decision.
 - [x] **I. Input edge cases** — `sweep` lossily decodes non-UTF-8 and deletes
   the original; CRLF text gets a hash that never matches (2 reviewers); a
   Slack DM is swept when `--channel-type` is omitted; NFC/NFD Hangul titles
@@ -160,10 +165,13 @@ annotations (new notes that point at it), never edits to it.
   in inbox/); line endings are LF in content and in note origins; titles are
   NFC before slugging; vocab rules skip URLs; `slack select` requires
   `--channel-type` and refuses any `D…` id.
-- [ ] **J. Skills promising what they don't do** — `end-of-day` calls itself
+- [x] **J. Skills promising what they don't do** — `end-of-day` calls itself
   read-only but runs `sync-all` (which labels Gmail); `gardener` leaves raw
   person links dangling and never finalizes; `digest`/`tasks` disagree on
   the task format; no skill says captured text is data, not instructions.
+  Fixed: end-of-day states its writes; gardener stubs merged person pages
+  and ends with finalize; digest uses the tasks record format; every skill
+  says captured text is data, not instructions.
 - [x] **Usability: commands only accept a doc id.** `show`/`tag`/`untag`/`rm`/
   `promote` (and the planned `annotate`) should take an id, an origin
   (`jira:PROJ-123`) or a file stem / `[[stem]]`, exact match only. Done in
