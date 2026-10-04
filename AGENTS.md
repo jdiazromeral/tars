@@ -192,7 +192,7 @@ properties — keep them straight:
   ingest data you're not permitted to send to a hosted LLM; the vault holds
   sensitive work data at your discretion, it is not a blanket "safe to dump
   anything" zone.
-- **Redaction**: `tars rm <doc_id>` is the one sanctioned way to remove a
+- **Redaction**: `tars rm <ref>` is the one sanctioned way to remove a
   capture (an accidental paste, a secret). It deletes the raw file, sidecar,
   and index row, and reports every wiki-link still pointing at the stem; run
   `tars hubs` after. Note: content already committed to vault git history
@@ -217,16 +217,21 @@ properties — keep them straight:
 - CLI usage: `tars add <url|file|->`, `tars add - --append [--create]`
   (`--append` adds stdin text to the end of the existing document for
   `--origin`, read and write under one DB lock; fails if none exists unless
-  `--create`), `tars sweep`, `tars tag|untag <doc_id>
+  `--create`), `tars sweep`, `tars tag|untag <ref>
   --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
-  `tars show <doc_id> [--path | --head N | --grep <regex> [-C N]]` (token-frugal
+  `tars show <ref> [--path | --head N | --grep <regex> [-C N]]` (token-frugal
   slices; a full show on a transcript can be ~30k tokens),
   `tars list [--connector ...] [--since <ISO>] [--json]`,
-  `tars promote <doc_id> --title ...`, `tars rm <doc_id> [--yes]`,
+  `tars promote <ref> --title ...`, `tars rm <ref> [--yes]`,
   `tars cursor <connector> [--set ... | --begin | --commit]`,
   `tars sync <connector>`, `tars normalize`, `tars reindex`, `tars migrate`,
   `tars backup [dir] [--keep N]`, `tars doctor [--json]`, `tars status`.
+- **`<ref>`** names one document in every command above: its id, its origin
+  (`jira:PROJ-123`), its file name or wiki-link (`[[proj-123-…]]`), or the
+  source key (`PROJ-123`). Exact match only, tried in that order; a miss or a
+  tie is an error naming the candidates — pass the user's own reference
+  straight through instead of searching for an id first.
 - **`tars doctor`** checks vault invariants — dangling `[[wiki-links]]`
   (including a task left citing a doc `tars rm` deleted), two files sharing a
   basename across layers (`ambiguous-stem` — every link to it resolves

@@ -31,14 +31,25 @@ def _open(start: Path | None = None):
     return root, database.connect(root)
 
 
-def _doc_row(db, doc_id: str):
-    """The index row (connector, origin, title, raw_dir) for DOC_ID, or a clean CLI error."""
-    row = db.execute(
-        "SELECT connector, origin, title, raw_dir FROM documents WHERE id = ?", (doc_id,)
-    ).fetchone()
-    if not row:
-        raise click.ClickException(f"no document with id {doc_id}")
-    return row
+REF_HELP = ("REF names one document: its id, its origin (jira:PROJ-123), its file name "
+            "or wiki-link ([[proj-123-…]]), or the source key (PROJ-123).")
+
+
+def _doc_row(db, ref: str):
+    """The index row for the document REF names (see `ingest.find_doc`), or a
+    clean CLI error that says what to run next."""
+    try:
+        return ingest.find_doc(db, ref)
+    except ingest.NoSuchDocument:
+        raise click.ClickException(
+            f"no document matches {ref!r} (tried id, origin, file name, source key) — "
+            f"find it with `tars search {ref}`")
+    except ingest.AmbiguousRef as exc:
+        lines = "\n".join(f"  {r['id']}  [{r['connector']}] {r['origin']}  {r['title'] or ''}"
+                          for r in exc.candidates)
+        raise click.ClickException(
+            f"{ref!r} matches {len(exc.candidates)} documents:\n{lines}\n"
+            "pass one of these ids")
 
 
 @click.group()
@@ -163,8 +174,8 @@ def search(query: str, limit: int, connector: str | None, raw_match: bool,
                 click.echo(f"    | {line}")
 
 
-@main.command()
-@click.argument("doc_id")
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
 @click.option("--path", "path_only", is_flag=True, help="Print the raw file path only.")
 @click.option("--head", type=click.IntRange(min=1),
               help="Print only the first N lines (frontmatter + opening).")
@@ -172,7 +183,7 @@ def search(query: str, limit: int, connector: str | None, raw_match: bool,
               help="Print only lines matching this case-insensitive regex, with context.")
 @click.option("-C", "--context", default=3, show_default=True,
               help="Context lines around each --grep match.")
-def show(doc_id: str, path_only: bool, head: int | None, pattern: str | None, context: int):
+def show(ref: str, path_only: bool, head: int | None, pattern: str | None, context: int):
     """Print a captured document (frontmatter + full normalized text).
 
     A capture can be tens of thousands of tokens (meeting transcripts); --head
@@ -183,7 +194,7 @@ def show(doc_id: str, path_only: bool, head: int | None, pattern: str | None, co
     if sum((path_only, head is not None, pattern is not None)) > 1:
         raise click.ClickException("choose at most one of --path / --head / --grep")
     root, db = _open()
-    row = _doc_row(db, doc_id)
+    row = _doc_row(db, ref)
     raw_path = root / row["raw_dir"]
     if path_only:
         click.echo(raw_path)
@@ -229,25 +240,27 @@ def list_(connector: str | None, since: str | None, as_json: bool):
         click.echo(f"{row['id']}  [{row['connector']}] {row['origin']}  {row['title'] or ''}")
 
 
-@main.command()
-@click.argument("doc_id")
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
 @click.option("--concept", "concepts", multiple=True, required=True,
               help="Concept slug(s) to attach; repeatable. Merges with existing ones.")
-def tag(doc_id: str, concepts: tuple[str, ...]):
+def tag(ref: str, concepts: tuple[str, ...]):
     """Attach concept wiki-links to an already-captured document (idempotent merge)."""
     root, db = _open()
+    doc_id = _doc_row(db, ref)["id"]
     status, merged = _shelve(root, db, doc_id,
                              add_concepts=[store.slugify(c) for c in concepts])
     click.echo(f"{status}  {doc_id}  concepts: {', '.join(merged)}")
 
 
-@main.command()
-@click.argument("doc_id")
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
 @click.option("--concept", "concepts", multiple=True, required=True,
               help="Concept slug(s) to remove; repeatable. Leaves the others intact.")
-def untag(doc_id: str, concepts: tuple[str, ...]):
+def untag(ref: str, concepts: tuple[str, ...]):
     """Remove concept wiki-links from a document (idempotent; the inverse of tag)."""
     root, db = _open()
+    doc_id = _doc_row(db, ref)["id"]
     status, left = _shelve(root, db, doc_id,
                            remove_concepts=[store.slugify(c) for c in concepts])
     click.echo(f"{status}  {doc_id}  concepts: {', '.join(left) or '(none)'}")
@@ -262,13 +275,14 @@ def _shelve(root, db, doc_id: str, **change):
         raise click.ClickException(f"{exc} — repair it before shelving this document")
 
 
-@main.command()
-@click.argument("doc_id")
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
 @click.option("--title", required=True, help="Title for the promoted note.")
-def promote(doc_id: str, title: str):
-    """Create a note skeleton in notes/ linked to DOC_ID; fill in the insight after."""
+def promote(ref: str, title: str):
+    """Create a note skeleton in notes/ linked to REF; fill in the insight after."""
     root, db = _open()
-    row = _doc_row(db, doc_id)
+    row = _doc_row(db, ref)
+    doc_id = row["id"]
     source_stem = Path(row["raw_dir"]).stem
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
     if note_path.exists():
@@ -512,10 +526,10 @@ def finalize():
     sys.exit(1)
 
 
-@main.command()
-@click.argument("doc_id")
+@main.command(epilog=REF_HELP)
+@click.argument("ref")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
-def rm(doc_id: str, yes: bool):
+def rm(ref: str, yes: bool):
     """Delete a captured document everywhere: raw file, sidecar source, index row.
 
     The sanctioned redaction path (an accidental capture, a pasted secret).
@@ -523,15 +537,16 @@ def rm(doc_id: str, yes: bool):
     `tars hubs` afterwards to drop it from concept pages.
     """
     root, db = _open()
-    row = _doc_row(db, doc_id)
+    row = _doc_row(db, ref)
+    doc_id = row["id"]
     raw_path = root / row["raw_dir"]
     if not yes:
         names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
         click.confirm(f"delete {names} and its index entry?", abort=True)
     removed = ingest.remove(root, db, doc_id)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
-    for ref in doctor_mod.references_to(root, raw_path.stem):
-        click.echo(f"  still referenced in {ref}")
+    for linker in doctor_mod.references_to(root, raw_path.stem):
+        click.echo(f"  still referenced in {linker}")
 
 
 @main.command()
