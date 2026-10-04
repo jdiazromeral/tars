@@ -103,7 +103,7 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
     try:
         doc_id, status = ingest.add(root, db, doc, extracted.source_bytes,
                                     extracted.source_ext, append=append,
-                                    create=create or not append)
+                                    create=create or not append, retitle=title is not None)
     except store.UnparseableRaw as exc:  # appending to a doc whose raw file is broken
         raise click.ClickException(f"{exc} — repair it before writing to this document")
     except ingest.WouldReplace as exc:

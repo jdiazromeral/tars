@@ -312,3 +312,92 @@ def test_api_append_defaults_to_not_creating(root):
     with pytest.raises(ingest.NoSuchDocument):
         ingest.add(path, database.connect(path),
                    store.RawDoc(connector="note", origin="note:typo", text="x"), append=True)
+
+
+# --- third review of #12: locate by id, merge tags everywhere ---
+
+def test_a_renamed_raw_file_is_still_found_and_protected(root):
+    path, runner = root
+    add(runner, "first words", "--origin", "note:slot", "--title", "slot")
+    (path / "raw/note/slot.md").rename(path / "raw/note/renamed.md")
+
+    assert add(runner, "replacement", "--origin", "note:slot", "--title", "slot").exit_code != 0
+    assert add(runner, "more", "--append", "--origin", "note:slot").exit_code == 0
+    assert sorted(p.name for p in path.glob("raw/note/*.md")) == ["renamed.md"]
+    assert store.read_raw(path / "raw/note/renamed.md").text == "first words\nmore"
+
+
+def test_a_stale_row_never_writes_into_another_documents_file(root):
+    # X's file was deleted by hand; Y then took its filename. The index row for
+    # X still points there — re-syncing X must not overwrite Y.
+    path, runner = root
+    add(runner, "X words", "--connector", "jira", "--origin", "jira:X", "--title", "foo")
+    (path / "raw/jira/foo.md").unlink()
+    add(runner, "Y words", "--connector", "jira", "--origin", "jira:Y", "--title", "foo")
+
+    add(runner, "X new", "--connector", "jira", "--origin", "jira:X", "--title", "foo")
+    texts = sorted(store.read_raw(p).text for p in path.glob("raw/jira/*.md"))
+    assert texts == ["X new", "Y words"]
+
+
+def test_readd_without_tag_keeps_stored_tags_and_provenance(root, tmp_path):
+    path, runner = root
+    f = tmp_path / "f.txt"
+    f.write_text("f body")
+    runner.invoke(main, ["add", str(f), "--tag", "keep"])
+    before = store.read_raw(next(path.glob("raw/file/*.md")))
+
+    result = runner.invoke(main, ["add", str(f)])
+    assert result.output.startswith("unchanged"), result.output
+    after = store.read_raw(next(path.glob("raw/file/*.md")))
+    kept = (before.tags, before.meta, before.captured_at)
+    assert (after.tags, after.meta, after.captured_at) == kept
+
+
+def test_a_sync_repairs_its_own_broken_snapshot(root):
+    # A synced file is a snapshot of its source: re-syncing over a broken one
+    # repairs it (concepts kept from the index), instead of crashing the sync.
+    path, runner = root
+    add(runner, "v1", "--connector", "jira", "--origin", "jira:P-1", "--title", "P1",
+        "--concept", "auth")
+    raw = path / "raw/jira/p1.md"
+    raw.write_text(raw.read_text().replace("tags: []", "tags: [oops"))
+
+    result = add(runner, "v2", "--connector", "jira", "--origin", "jira:P-1", "--title", "P1")
+    assert result.output.startswith("updated"), result.output
+    doc = store.read_raw(raw)
+    assert (doc.text, doc.concepts) == ("v2", ["auth"])
+
+
+def test_index_catch_up_keeps_the_raw_captured_at(root):
+    import json
+    path, runner = root
+    add(runner, "kept", "--connector", "jira", "--origin", "jira:K", "--title", "K")
+    raw = path / "raw/jira/k.md"
+    raw.write_text(raw.read_text().replace(store.read_raw(raw).captured_at, "2020-01-01T00:00:00Z"))
+    captured = "2020-01-01T00:00:00Z"
+    for db_file in path.glob("tars.db*"):
+        db_file.unlink()
+
+    assert add(runner, "kept", "--connector", "jira", "--origin", "jira:K",
+               "--title", "K").output.startswith("unchanged")
+    listing = json.loads(runner.invoke(main, ["list", "--json"]).output)
+    assert listing[0]["captured_at"] == captured
+
+
+def test_an_explicit_title_retitles_a_content_addressed_note(root):
+    path, runner = root
+    add(runner, "some words", "--title", "T")
+
+    result = add(runner, "some words", "--title", "New title")
+    assert result.output.startswith("updated"), result.output
+    assert store.read_raw(path / "raw/note/t.md").title == "New title"
+
+
+def test_a_brand_new_document_does_not_scan_the_folder(root, monkeypatch):
+    _, runner = root
+    def no_scan(*args, **kwargs):
+        raise AssertionError("find_raw scanned for a new, non-append document")
+    monkeypatch.setattr(store, "find_raw", no_scan)
+    assert add(runner, "fresh", "--connector", "jira", "--origin", "jira:NEW",
+               "--title", "new").output.startswith("added")

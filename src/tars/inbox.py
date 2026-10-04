@@ -69,10 +69,7 @@ def sweep(root: Path, db: sqlite3.Connection) -> list[Drop]:
         )
         try:
             doc_id, status = ingest.add(root, db, doc)
-        except ingest.WouldReplace as exc:  # leave it in inbox/: never unlink what wasn't ingested
-            drops.append(Drop(f.name, "kept", title=str(exc)))
-            continue
-        except store.UnparseableRaw as exc:
+        except store.UnparseableRaw as exc:  # leave it in inbox/: never unlink what wasn't ingested
             drops.append(Drop(f.name, "kept", title=f"{exc.path.relative_to(root)}: {exc.reason}"))
             continue
         f.unlink()
