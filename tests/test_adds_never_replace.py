@@ -95,3 +95,48 @@ def test_a_refused_readd_logs_nothing(root):
 
     log = (path / "log/ingestions.jsonl").read_text().splitlines()
     assert len(log) == 1 and '"added"' in log[0]
+
+
+@pytest.mark.parametrize("command", ["tag", "untag"])
+def test_shelving_never_overwrites_a_concurrent_append(root, monkeypatch, command):
+    # tag/untag used to read the raw file outside the write lock and re-add the
+    # whole document, so an append landing in between was overwritten by the
+    # stale snapshot. Replay that interleaving: the moment the shelving command
+    # has read the file, another connection appends to it.
+    import threading
+
+    from tars import db as database
+    from tars import ingest
+
+    path, runner = root
+    first = add(runner, "- entry one", "--append", "--create", "--connector", "activity",
+                "--origin", "activity:d1", "--title", "d1", "--concept", "keep")
+    doc_id = first.output.split()[1]
+
+    def append_entry():
+        conn = database.connect(path)
+        ingest.add(path, conn, store.RawDoc(connector="activity", origin="activity:d1",
+                                            text="- entry two"), append=True, create=False)
+        conn.close()
+
+    real_read = store.read_raw
+    racers = []
+
+    def read_then_race(p, *args, **kwargs):
+        doc = real_read(p, *args, **kwargs)
+        if not racers:
+            racers.append(threading.Thread(target=append_entry))
+            racers[0].start()
+            racers[0].join(timeout=1)  # done if nothing holds the lock; blocked if shelving does
+        return doc
+
+    monkeypatch.setattr(store, "read_raw", read_then_race)
+    concept = "keep" if command == "untag" else "x"
+    result = runner.invoke(main, [command, doc_id, "--concept", concept])
+    assert result.exit_code == 0, (result.output, repr(result.exception))
+    racers[0].join(timeout=15)
+    monkeypatch.undo()
+
+    doc = store.read_raw(path / "raw/activity/d1.md")
+    assert doc.text.splitlines() == ["- entry one", "- entry two"]
+    assert doc.concepts == ([] if command == "untag" else ["keep", "x"])
