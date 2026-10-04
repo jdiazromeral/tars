@@ -100,7 +100,8 @@ def test_slack_select_cli_reports_resume_from(root):
     path, runner = root
     (path / "connectors.yml").write_text(
         "slack:\n  channels: [C0AAA111]\n  max_threads_per_run: 1\n")
-    result = runner.invoke(main, ["slack", "select", "--channel", "C0AAA111"],
+    result = runner.invoke(main, ["slack", "select", "--channel", "C0AAA111",
+                                  "--channel-type", "public_channel"],
                            input=json.dumps(_threads(3)))
     assert result.exit_code == 0, result.output
     out = json.loads(result.output)
