@@ -192,3 +192,37 @@ def test_heading_links_and_non_ascii_case(root, ref):
     result = runner.invoke(main, ["show", ref, "--head", "2"])
     assert result.exit_code == 0, result.output
     assert f"id: {doc}" in result.output
+
+
+# --- third review of #13 ---
+
+def test_rm_yes_on_a_tied_exact_reference_lists_candidates(root):
+    _, runner = root
+    runner.invoke(main, ["add", "-", "--connector", "web", "--origin", "https://ex.com/a",
+                         "--title", "page"], input="page")
+    runner.invoke(main, ["add", "-", "--origin", "https://ex.com/a", "--title", "excerpt"],
+                  input="excerpt")
+    result = runner.invoke(main, ["rm", "https://ex.com/a", "--yes"])
+    assert result.exit_code == 1, result.output  # a clean error, not a traceback
+    assert "matches 2 documents" in result.output
+
+
+@pytest.mark.parametrize("form", ["absolute", "no-suffix"])
+def test_the_path_show_prints_is_a_reference(root, form):
+    path, runner = root
+    doc_id = _ticket(runner)
+    printed = runner.invoke(main, ["show", doc_id, "--path"]).output.strip()
+    ref = printed if form == "absolute" else "raw/jira/proj-123-migrate-auth-to-oidc"
+    result = runner.invoke(main, ["rm", ref, "--yes"])
+    assert result.exit_code == 0, result.output
+    assert doc_id in result.output
+
+
+def test_non_ascii_capitals_fold_on_both_sides(root):
+    _, runner = root
+    doc = runner.invoke(main, ["add", "-", "--connector", "granola", "--origin",
+                               "granola:ÓRDENES-2026", "--title", "x"],
+                        input="acta").output.split()[1]
+    result = runner.invoke(main, ["show", "órdenes-2026", "--head", "2"])
+    assert result.exit_code == 0, result.output
+    assert f"id: {doc}" in result.output

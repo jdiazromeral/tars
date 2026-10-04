@@ -100,6 +100,16 @@ class NoSuchDocument(Exception):
     (see `find_doc`) that names no document."""
 
 
+def _raw_path_ref(ref: str) -> str:
+    """A raw file path as the index stores it (`raw/<connector>/<name>.md`),
+    from what a user or agent holds: the absolute path `tars show --path`
+    prints, or a raw/ path without `.md`. Anything else is returned as is."""
+    parts = Path(ref).parts
+    if len(parts) >= 3 and parts[-3] == "raw":
+        return "/".join(parts[-3:-1] + (parts[-1].removesuffix(".md") + ".md",))
+    return ref
+
+
 class AmbiguousRef(LookupError):
     """A reference matched more than one document; `candidates` are their rows."""
 
@@ -130,17 +140,18 @@ def find_doc(db: sqlite3.Connection, ref: str, *, loose: bool = True) -> sqlite3
         origins.add(store.canonical_url(ref))
     steps = [("id = ?", (ref,)),
              (f"origin IN ({', '.join('?' * len(origins))})", tuple(origins)),
-             ("raw_dir = ?", (ref,))]
+             ("raw_dir = ?", (_raw_path_ref(ref),))]
     if loose:
         link = store.WIKI_LINK_RE.fullmatch(ref)
         # a link's #heading / #^block names a spot inside the file, not the file
         name = link.group(1).split("#", 1)[0].strip() if link else ref.removesuffix(".md")
-        # folded in Python: SQLite's lower() only folds ASCII (Reunión, Ó)
-        steps.append(("lower(substr(raw_dir, length(raw_dir) - length(?1) - 3)) = "
-                      "'/' || ?1 || '.md' "
+        # Fold both sides in Python: SQLite's lower() folds ASCII only (Ó, İ).
+        db.create_function("tars_fold", 1, lambda s: s.casefold() if s else s,
+                           deterministic=True)
+        steps.append(("substr(tars_fold(raw_dir), -length(?1)) = ?1 "
                       "OR (instr(origin, ':') > 0 "
-                      "AND lower(substr(origin, instr(origin, ':') + 1)) = ?2)",
-                      (name.lower(), ref.lower())))
+                      "AND tars_fold(substr(origin, instr(origin, ':') + 1)) = ?2)",
+                      (f"/{name.casefold()}.md", ref.casefold())))
     for condition, params in steps:
         rows = db.execute(f"SELECT {_DOC_COLUMNS} FROM documents WHERE {condition} "
                           "ORDER BY connector, origin", params).fetchall()
@@ -433,7 +444,10 @@ def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
         connector="note",
         origin=note_origin(f"{target['id']}\n{text}"),
         text=text,
-        title=title or f"On {target['title'] or target['origin']}",
+        # Never derived from the target's title: `tars rm` of a target (say, one
+        # with a pasted secret in its title) keeps its annotations, which must
+        # not carry that title along in their own title or file name.
+        title=title or text.partition("\n")[0][:80].strip(),
         concepts=list(dict.fromkeys([*shelved, *(store.slugify(c) for c in concepts)])),
         meta={"annotates": target["id"]},
     )
