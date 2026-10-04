@@ -176,6 +176,13 @@ echo '<conversations.history JSON>' \
   | tars slack select --channel <CHANNEL_ID> --channel-type <public_channel|private_channel|mpim>
 ```
 
+`--channel-type` comes from the conversation's **own metadata** — the
+`is_im` / `is_mpim` / `is_private` flags on the channel object the Slack MCP
+returns (its channel info or search result) — never from a guess or a name.
+If those flags aren't available for a channel, don't sweep it: the type is
+what keeps group DMs behind `include_group_dms`. (`D…` ids are refused as 1:1
+DMs whatever type is passed.)
+
 It answers `{selected: [{thread_ts, signal, reply_count, reaction_total}],
 skipped: {reason: n}, truncated: bool, resume_from: <ISO> | null}`. Selection
 runs oldest-first, so a capped run keeps the oldest threads.

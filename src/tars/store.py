@@ -229,12 +229,16 @@ def raw_path_for(root: Path, doc: RawDoc, existing: str | None = None) -> Path:
     conn_dir = root / RAW_DIR / slugify(doc.connector)
     base = slugify(doc.title) if doc.title else doc.id
     candidate = conn_dir / f"{base}.md"
-    if candidate.exists() and file_doc_id(candidate) == doc.id:
-        return candidate  # this doc already owns the name
+    if candidate.exists():
+        if file_doc_id(candidate) == doc.id:
+            return candidate  # this doc already owns the name
+        # Someone else's file — possibly under another Unicode form of the same
+        # name, which APFS treats as this one: never write over it.
+        return conn_dir / f"{base}-{doc.id[:6]}.md"
     # Collisions are checked across the whole vault, not just this connector
     # dir: a capture titled "Design Patterns" must not shadow the concept hub
     # of the same slug, or every [[design-patterns]] link becomes ambiguous.
-    if any(f.stem == base for f in linkable_files(root)):
+    if any(unicodedata.normalize("NFC", f.stem) == base for f in linkable_files(root)):
         return conn_dir / f"{base}-{doc.id[:6]}.md"
     return candidate
 

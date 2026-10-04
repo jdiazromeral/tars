@@ -145,3 +145,44 @@ def test_a_dm_id_is_refused_whatever_its_label(root, label):
                            input=json.dumps([{"ts": "1.0", "reply_count": 3}]))
     assert result.exit_code != 0
     assert "1:1 DM" in result.output
+
+
+# --- review of #16 -------------------------------------------------------------
+
+def test_a_legacy_nfd_named_file_is_never_overwritten(root):
+    # A file named from an NFD title before slugify composed to NFC: APFS says
+    # the NFC name exists, but the stems compare unequal as strings. Any
+    # existing file that isn't ours must push the new capture to a suffix.
+    path, runner = root
+    legacy = path / "raw/note" / (unicodedata.normalize("NFD", "한글-문서") + ".md")
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("---\nid: aaaaaaaaaaaa\nconnector: note\norigin: note:legacy\n"
+                      "title: old\nconcepts: []\n---\n\nlegacy words\n")
+    result = _add_titled(path, "한글 문서", "new words")
+    assert result.returncode == 0, result.stderr
+    bodies = sorted(p.read_text().rsplit("\n\n", 1)[-1].strip()
+                    for p in path.glob("raw/note/*.md"))
+    assert bodies == ["legacy words", "new words"]
+
+
+@pytest.mark.parametrize("text", [
+    "<mailto:bob@acne.com|bob@acne.com>",
+    "write to bob@acne.com today",
+    "see www.acne.com/acne",
+    "acnehttps://x.com",          # no word boundary before the URL: not a match
+])
+def test_vocab_rules_never_rewrite_an_address(tmp_path, text):
+    (tmp_path / "vocab.yml").write_text("Acme:\n  variants: [acne]\n")
+    assert normalize.apply(text, normalize.load_rules(tmp_path)) == text
+
+
+def test_a_utf8_bom_is_dropped_on_the_way_in(root, tmp_path_factory):
+    path, runner = root
+    (path / "inbox/2026-10-04.txt").write_bytes("﻿Meeting notes\nbody".encode("utf-8"))
+    runner.invoke(main, ["sweep"])
+    f = tmp_path_factory.mktemp("src") / "bom.txt"
+    f.write_bytes("﻿Other notes".encode("utf-8"))
+    runner.invoke(main, ["add", str(f)])
+    for p in path.glob("raw/*/*.md"):
+        doc = store.read_raw(p)
+        assert not doc.text.startswith("﻿") and not (doc.title or "").startswith("﻿")

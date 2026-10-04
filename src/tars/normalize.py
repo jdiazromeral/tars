@@ -63,19 +63,26 @@ def load_rules(root: Path) -> list[Rule]:
     return rules
 
 
-# A URL ends at whitespace or at the delimiters that wrap one in markdown or
-# Slack (<url|label>, [label](url)); the capture group keeps it in re.split.
-_URL = re.compile(r"(https?://[^\s<>|)\]]+)")
+# Addresses, not prose: a URL, a mailto:/www. link, or an email address. A
+# link ends at whitespace or at the delimiters that wrap one in markdown or
+# Slack (<url|label>, [label](url)).
+_ADDRESS = re.compile(r"(?:https?://|mailto:|www\.)[^\s<>|)\]]+"
+                      r"|[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 
 def apply(text: str, rules: list[Rule], connector: str | None = None) -> str:
-    """Rewrite STT variants to their canonical form — outside URLs only: a
-    variant inside a link's host or path is an address, not a mishearing."""
-    active = [r for r in rules if r.connectors is None or connector in r.connectors]
-    if not active:
-        return text
-    parts = _URL.split(text)
-    for i in range(0, len(parts), 2):  # even parts are prose, odd ones URLs
-        for rule in active:
-            parts[i] = rule.pattern.sub(lambda _m, c=rule.canonical: c, parts[i])
-    return "".join(parts)
+    """Rewrite STT variants to their canonical form — outside addresses only: a
+    variant inside a link's host or path, or an email, is an address, not a
+    mishearing. Matched against the whole text, so word boundaries next to an
+    address mean what they always did."""
+    for rule in rules:
+        if rule.connectors is not None and connector not in rule.connectors:
+            continue
+        spans = [m.span() for m in _ADDRESS.finditer(text)]
+
+        def replace(m: re.Match, canonical: str = rule.canonical) -> str:
+            inside = any(start <= m.start() < end for start, end in spans)
+            return m.group(0) if inside else canonical
+
+        text = rule.pattern.sub(replace, text)
+    return text
