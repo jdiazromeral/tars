@@ -609,8 +609,10 @@ def rm(ref: str, yes: bool):
     annotations = ingest.annotations_of(db, doc_id)
     removed = ingest.remove(root, db, doc_id)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
+    stem = store.stem_of(row["raw_dir"])
     for note in annotations:  # the user's own words: kept, never cascaded
-        click.echo(f"  annotation {note['id']} still points at it (kept; `tars rm` it if unwanted)")
+        click.echo(f"  annotation {note['id']} still points at it (kept; its [[{stem}]] link in "
+                   "Obsidian is now unresolved — `tars rm` it if unwanted)")
     for linker in doctor_mod.references_to(root, store.stem_of(row["raw_dir"])):
         click.echo(f"  still referenced in {linker}")
 

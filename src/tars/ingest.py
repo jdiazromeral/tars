@@ -433,7 +433,8 @@ def index_doc(db: sqlite3.Connection, doc: RawDoc, digest: str, raw_dir: str) ->
 def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
              title: str | None = None, concepts: Sequence[str] = ()) -> tuple[str, str]:
     """Record the user's words about `target` (a `find_doc` row) as a note of
-    their own: `meta.annotates` holds the target's id and the note inherits its
+    their own: `meta.annotates_id` holds the target's id for tars, a top-level
+    `annotates: "[[stem]]"` property is the link Obsidian reads, and the note inherits its
     concepts, so it shelves into the same hubs. The target is never touched, so
     a re-sync of it can't lose the annotation. The origin hashes target and
     text together: the same words twice on one target are one note (a retried
@@ -449,7 +450,8 @@ def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
         # not carry that title along in their own title or file name.
         title=title or text.partition("\n")[0][:80].strip(),
         concepts=list(dict.fromkeys([*shelved, *(store.slugify(c) for c in concepts)])),
-        meta={"annotates": target["id"]},
+        meta={"annotates_id": target["id"]},
+        annotates=f"[[{store.stem_of(target['raw_dir'])}]]",
     )
     return add(root, db, doc, retitle=title is not None)
 
@@ -458,7 +460,7 @@ def annotations_of(db: sqlite3.Connection, doc_id: str) -> list[sqlite3.Row]:
     """The annotations that point at `doc_id`, oldest first."""
     return db.execute(
         "SELECT id, title, captured_at, raw_dir FROM documents "
-        "WHERE json_extract(meta, '$.annotates') = ? ORDER BY captured_at, id",
+        "WHERE json_extract(meta, '$.annotates_id') = ? ORDER BY captured_at, id",
         (doc_id,)).fetchall()
 
 

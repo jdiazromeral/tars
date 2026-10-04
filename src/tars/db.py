@@ -51,8 +51,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id);
 {FTS_DDL}
 
 -- annotations_of() looks annotations up by their target on every show/rm
-CREATE INDEX IF NOT EXISTS documents_annotates
-    ON documents (json_extract(meta, '$.annotates'));
+CREATE INDEX IF NOT EXISTS documents_annotates_id
+    ON documents (json_extract(meta, '$.annotates_id'));
 
 CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
     INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
