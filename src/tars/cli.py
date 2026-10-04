@@ -31,18 +31,20 @@ def _open(start: Path | None = None):
     return root, database.connect(root)
 
 
-REF_HELP = ("REF names one document: its id, its origin (jira:PROJ-123), its file name "
-            "or wiki-link ([[proj-123-…]]), or the source key (PROJ-123).")
+REF_HELP = ("REF names one document: its id, its origin (jira:PROJ-123) or raw/ path, "
+            "or — matched together, case-insensitively — its file name or wiki-link "
+            "([[proj-123-…]]) and the source key (PROJ-123).")
 
 
-def _doc_row(db, ref: str):
+def _doc_row(db, ref: str, *, loose: bool = True):
     """The index row for the document REF names (see `ingest.find_doc`), or a
     clean CLI error that says what to run next."""
     try:
-        return ingest.find_doc(db, ref)
+        return ingest.find_doc(db, ref, loose=loose)
     except ingest.NoSuchDocument:
+        tried = "id, origin, raw/ path" + (", file name, source key" if loose else "")
         raise click.ClickException(
-            f"no document matches {ref!r} (tried id, origin, file name, source key) — "
+            f"no document matches {ref!r} (tried {tried}) — "
             f"find it with `tars search {ref}`")
     except ingest.AmbiguousRef as exc:
         lines = "\n".join(f"  {r['id']}  [{r['connector']}] {r['origin']}  {r['title'] or ''}"
@@ -140,7 +142,8 @@ def annotate(ref: str, text: str, title: str | None, concepts: tuple[str, ...]):
     TEXT is the note, or '-' to read it from stdin (multi-line, no quoting).
     It is saved as a note of its own that points at REF and inherits its
     concepts: a re-sync of a ticket or thread can't lose it, and `tars show
-    REF` lists it under the document. The same words twice are one note.
+    REF --annotations` lists it. The same words twice are one note. Words
+    that start with '-' go after '--': `tars annotate REF -- "-1 on this"`.
     """
     words = (click.get_text_stream("stdin").read() if text == "-" else text).strip()
     if not words:
@@ -151,7 +154,7 @@ def annotate(ref: str, text: str, title: str | None, concepts: tuple[str, ...]):
         doc_id, status = ingest.annotate(root, db, target, words, title, concepts)
     except store.UnparseableRaw as exc:
         raise click.ClickException(f"{exc} — repair it before annotating again")
-    stem = Path(target["raw_dir"]).stem
+    stem = store.stem_of(target["raw_dir"])
     click.echo(f"{status}  {doc_id}  on [[{stem}]]  {target['title'] or target['origin']}")
 
 
@@ -322,8 +325,8 @@ def untag(ref: str, concepts: tuple[str, ...]):
 def _shelve(root, db, doc_id: str, **change):
     try:
         return ingest.shelve(root, db, doc_id, **change)
-    except ingest.NoSuchDocument:
-        raise click.ClickException(f"no document with id {doc_id}")
+    except ingest.NoSuchDocument:  # removed between resolving the ref and the lock
+        raise click.ClickException(f"document {doc_id} was removed meanwhile")
     except store.UnparseableRaw as exc:
         raise click.ClickException(f"{exc} — repair it before shelving this document")
 
@@ -336,7 +339,7 @@ def promote(ref: str, title: str):
     root, db = _open()
     row = _doc_row(db, ref)
     doc_id = row["id"]
-    source_stem = Path(row["raw_dir"]).stem
+    source_stem = store.stem_of(row["raw_dir"])
     note_path = root / store.NOTES_DIR / f"{store.slugify(title)}.md"
     if note_path.exists():
         raise click.ClickException(f"note already exists: {note_path}")
@@ -590,18 +593,29 @@ def rm(ref: str, yes: bool):
     `tars hubs` afterwards to drop it from concept pages.
     """
     root, db = _open()
-    row = _doc_row(db, ref)
+    # --yes deletes with no prompt, so it never acts on a guess: only an exact
+    # reference (id, origin, raw/ path). A loose one must be confirmed by eye.
+    if yes:
+        try:
+            row = ingest.find_doc(db, ref, loose=False)
+        except ingest.NoSuchDocument:
+            raise click.ClickException(
+                f"rm --yes needs an exact reference (id, origin or raw/ path), not {ref!r} — "
+                f"run `tars rm {ref}` to confirm what it matches, or pass the id")
+    else:
+        row = _doc_row(db, ref)
     doc_id = row["id"]
     raw_path = root / row["raw_dir"]
     if not yes:
         names = ", ".join(t.name for t in store.raw_files(raw_path)) or row["raw_dir"]
-        click.confirm(f"delete {names} and its index entry?", abort=True)
+        click.confirm(f"delete {doc_id}  [{row['connector']}] {row['title'] or row['origin']}"
+                      f"  ({names}) and its index entry?", abort=True)
     annotations = ingest.annotations_of(db, doc_id)
     removed = ingest.remove(root, db, doc_id)
     click.echo(f"deleted  {doc_id}  [{removed['origin']}] {removed['title'] or ''}")
     for note in annotations:  # the user's own words: kept, never cascaded
         click.echo(f"  annotation {note['id']} still points at it (kept; `tars rm` it if unwanted)")
-    for linker in doctor_mod.references_to(root, raw_path.stem):
+    for linker in doctor_mod.references_to(root, store.stem_of(row["raw_dir"])):
         click.echo(f"  still referenced in {linker}")
 
 

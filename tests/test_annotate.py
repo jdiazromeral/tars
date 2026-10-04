@@ -110,7 +110,7 @@ def test_rm_warns_about_annotations_and_keeps_them(root):
     _ticket(runner)
     note_id = _annotate(runner, "PROJ-123", "keep me").output.split()[1]
 
-    result = runner.invoke(main, ["rm", "PROJ-123", "--yes"])
+    result = runner.invoke(main, ["rm", "jira:PROJ-123", "--yes"])
     assert result.exit_code == 0, result.output
     assert f"annotation {note_id} still points at it" in result.output
     assert len(list(path.glob("raw/note/*.md"))) == 1
@@ -122,7 +122,7 @@ def test_an_annotation_outlives_its_target_without_nagging(root):
     _, runner = root
     _ticket(runner)
     _annotate(runner, "PROJ-123", "the kerberos fallback is unowned")
-    runner.invoke(main, ["rm", "PROJ-123", "--yes"])
+    runner.invoke(main, ["rm", "jira:PROJ-123", "--yes"])
     runner.invoke(main, ["hubs"])
 
     doctor = runner.invoke(main, ["doctor"])
@@ -163,3 +163,11 @@ def test_show_points_at_annotations_without_mixing_them_into_the_source(root):
     listed = runner.invoke(main, ["show", "PROJ-123", "--annotations"]).output
     assert note_id in listed and "I'll ask Ana to redo it" in listed
     assert "Migrate auth" not in listed
+
+
+def test_words_starting_with_a_dash_go_after_double_dash(root):
+    path, runner = root
+    _ticket(runner)
+    result = _annotate(runner, "PROJ-123", "--", "-1 on this estimate")
+    assert result.exit_code == 0, result.output
+    assert store.read_raw(next(path.glob("raw/note/*.md"))).text == "-1 on this estimate"

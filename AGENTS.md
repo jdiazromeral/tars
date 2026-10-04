@@ -236,11 +236,14 @@ properties — keep them straight:
   `tars cursor <connector> [--set ... | --begin | --commit]`,
   `tars sync <connector>`, `tars normalize`, `tars reindex`, `tars migrate`,
   `tars backup [dir] [--keep N]`, `tars doctor [--json]`, `tars status`.
-- **`<ref>`** names one document in every command above: its id, its origin
-  (`jira:PROJ-123`), its file name or wiki-link (`[[proj-123-…]]`), or the
-  source key (`PROJ-123`). Exact match only, tried in that order; a miss or a
-  tie is an error naming the candidates — pass the user's own reference
-  straight through instead of searching for an id first.
+- **`<ref>`** names one document in every command above. Exact forms first:
+  the id, the origin (`jira:PROJ-123`, URLs canonicalized), the `raw/…` path.
+  Then the loose forms, matched *together* and case-insensitively: the file
+  name or wiki-link (`[[proj-123-…#heading|alias]]`) and the source key
+  (`PROJ-123`). No match is an error pointing at `tars search`; a tie lists
+  the candidates (pass one of their ids). Pass the user's own reference
+  straight through instead of searching for an id first. `tars rm --yes`
+  accepts exact forms only — it never deletes on a loose match.
 - **`tars doctor`** checks vault invariants — dangling `[[wiki-links]]`
   (including a task left citing a doc `tars rm` deleted), two files sharing a
   basename across layers (`ambiguous-stem` — every link to it resolves
