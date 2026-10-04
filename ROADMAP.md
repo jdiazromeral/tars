@@ -109,6 +109,54 @@ the three ideas worth keeping, each behind its trigger:
   accumulating in `retrieval-misses.md` — the same evidence file that gates
   revisiting the removed raw index.
 
+## Code health — findings from the 2026-10-04 risk review
+
+Four parallel reviewers, one per risk (data integrity, identity, untrusted
+input, skills vs CLI), each finding reproduced on a temp vault and re-run
+before it landed here. Grouped into themes, ordered by what they can cost.
+Design direction agreed with the user: **tars only ever adds** — reads never
+change raw, your words are never replaced, and comments on a source are
+annotations (new notes that point at it), never edits to it.
+
+- [x] **A. A leading `Concepts:` line was eaten** on the next read-modify-write
+  of an unshelved doc (3 of 4 reviewers). Fixed: stripped only when the doc
+  is shelved.
+- [x] **B. `reindex` rewrote raw and wasn't atomic** — re-normalized text,
+  dropped unknown frontmatter keys, committed the DELETE first, and one bad
+  file crashed it (and doctor/finalize) midway. Fixed: read-only, one
+  transaction, unparseable files skipped and reported (`unparseable-raw`).
+- [ ] **C. `capture` overwrites living notes, agent worklogs and excerpts** —
+  the skill never mentions `--append`; same-slot re-adds replace silently.
+- [ ] **D. Sync windows that lose items** — `sync-granola` advances with
+  `--set` even after skipping meetings; the Slack cap keeps the newest
+  threads so a backlog never reaches the oldest. Plausible: ISO watermarks
+  passed unconverted to JQL / Gmail `after:` / Slack `oldest=`.
+- [ ] **E. Re-add drops metadata** — `--append` without `--title` nulls the
+  title and wipes tags; a title-only change reports `unchanged`; `--append`
+  to a missing slot silently creates a doc.
+- [ ] **F. `tag`/`untag`/`normalize` read outside the lock** — a concurrent
+  `--append` (track) between their read and write is lost (2 reviewers).
+- [ ] **G. Hostile titles** — a newline in a title injects headings/links into
+  hubs (growing every `tars hubs`, doctor clean); `promote` writes invalid
+  YAML for `: ` titles and can mint a stem that collides with a raw doc.
+- [ ] **H. What `rm` doesn't erase** — free pages of tars.db, the log (title,
+  origin), hubs, vault git history, backups. `rm` only mentions links.
+- [ ] **I. Input edge cases** — `sweep` lossily decodes non-UTF-8 and deletes
+  the original; CRLF text gets a hash that never matches (2 reviewers); a
+  Slack DM is swept when `--channel-type` is omitted; NFC/NFD Hangul titles
+  share one file on APFS; `normalize` rewrites inside URLs.
+- [ ] **J. Skills promising what they don't do** — `end-of-day` calls itself
+  read-only but runs `sync-all` (which labels Gmail); `gardener` leaves raw
+  person links dangling and never finalizes; `digest`/`tasks` disagree on
+  the task format; no skill says captured text is data, not instructions.
+- [ ] **Usability: commands only accept a doc id.** `show`/`tag`/`untag`/`rm`/
+  `promote` (and the planned `annotate`) should take an id, an origin
+  (`jira:PROJ-123`) or a file stem / `[[stem]]`, exact match only.
+- Low priority, noted: no fsync before rename; hubs written non-atomically;
+  one pending-cursor slot shared by overlapping sweeps; URL variants (`/a` vs
+  `/a/`, `:443`, query order) mint duplicates; a lost tars.db plus a
+  re-titled re-add creates two files with one id, which doctor can't see.
+
 ## Code health — findings from the 2026-07-08 full review
 
 Ordered by priority; tick them off as they land. These are observed defects,
@@ -174,12 +222,14 @@ not anticipation, so they don't need triggers. A second review pass on
   link to `foo`), `inbox.py` and `backup.py`. What stays is argument handling,
   output, and read-only queries (`list`, `status`): 716 → 596 lines, none of
   them a rule the vault depends on.
-- [ ] **De-duplicate the invariants (currently in triplicate).** The origin
+- [x] **De-duplicate the invariants (currently in triplicate).** The origin
   contract lives in README, AGENTS.md, *and* the `connectors/__init__.py`
   docstring; vocab scoping in AGENTS.md *and* `normalize.py`. Pick one home
   per invariant (contract prose in code docstrings; AGENTS.md links, doesn't
   restate) before the copies drift. The `.claude-plugin/*.json` skill lists are
   a fresh instance of the same class — see Nits — and have *already* drifted.
+  Done 2026-10-04 (#9): AGENTS.md owns the contract; README and the package
+  docstring point at it; the agy manifest is a symlink.
 - [x] **CI + lint + type check.** Type hints everywhere, nothing enforces
   them; a good test suite nothing runs automatically. ruff + pyright +
   a GitHub Actions workflow running `uv run pytest` — an hour of work for a
