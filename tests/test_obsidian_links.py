@@ -92,3 +92,13 @@ def test_a_non_string_annotates_property_is_unparseable(root):
         'annotates:\n- "[[proj-123-migrate-auth-to-oidc]]"'))
     with pytest.raises(store.UnparseableRaw, match="annotates"):
         store.read_raw(note)
+
+
+def test_the_target_id_is_quoted_so_no_yaml_reads_it_as_a_number(root):
+    # Ids are hex; an all-digit one (036199599289) is an integer to YAML 1.2
+    # readers such as Obsidian, which would drop the leading zero on re-save.
+    path, runner, target_id = root
+    runner.invoke(main, ["annotate", "PROJ-123", "x"])
+    note = _annotation(path)
+    runner.invoke(main, ["tag", "raw/note/" + note.name, "--concept", "sso"])  # a rewrite
+    assert f'annotates_id: "{target_id}"' in note.read_text()
