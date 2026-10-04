@@ -112,7 +112,7 @@ def test_rm_warns_about_annotations_and_keeps_them(root):
 
     result = runner.invoke(main, ["rm", "jira:PROJ-123", "--yes"])
     assert result.exit_code == 0, result.output
-    assert f"annotation {note_id} still points at it" in result.output
+    assert f"annotation {note_id} kept as a plain note" in result.output
     assert len(list(path.glob("raw/note/*.md"))) == 1
 
 

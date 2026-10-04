@@ -296,6 +296,7 @@ def _merge_stored(doc: RawDoc, stored: RawDoc, *, append: bool,
     """
     doc.concepts = list(dict.fromkeys(stored.concepts + doc.concepts))
     doc.tags = list(dict.fromkeys(stored.tags + doc.tags))  # labels only grow, like shelving
+    doc.annotates = doc.annotates or stored.annotates  # an annotation's link survives an append
     addressed = _addressed(doc)
     if doc.title is None or (addressed and not retitle):
         # a re-drop under a new filename isn't a rename; an explicit --title is
@@ -325,8 +326,8 @@ def _merge_stored(doc: RawDoc, stored: RawDoc, *, append: bool,
 def _same(doc: RawDoc, stored: RawDoc) -> bool:
     """Nothing to write. Meta counts only where it's merged (authored text): a
     synced source's meta can carry volatile fields that would churn every sync."""
-    fields = (doc.text, doc.title, doc.tags, doc.concepts)
-    if fields != (stored.text, stored.title, stored.tags, stored.concepts):
+    fields = (doc.text, doc.title, doc.tags, doc.concepts, doc.annotates)
+    if fields != (stored.text, stored.title, stored.tags, stored.concepts, stored.annotates):
         return False
     return doc.connector not in AUTHORED_CONNECTORS or doc.meta == stored.meta
 
@@ -451,9 +452,43 @@ def annotate(root: Path, db: sqlite3.Connection, target: sqlite3.Row, text: str,
         title=title or text.partition("\n")[0][:80].strip(),
         concepts=list(dict.fromkeys([*shelved, *(store.slugify(c) for c in concepts)])),
         meta={"annotates_id": target["id"]},
-        annotates=f"[[{store.stem_of(target['raw_dir'])}]]",
+        annotates=f"[[{_target_path(root, target).stem}]]",
     )
     return add(root, db, doc, retitle=title is not None)
+
+
+def _target_path(root: Path, target: sqlite3.Row) -> Path:
+    """The file the target really lives in: the row's path if that file still
+    carries the target's id, else found by id (a hand rename the index hasn't
+    seen) — a link to a stale name would dangle from the moment it is written."""
+    path = root / target["raw_dir"]
+    if store.file_doc_id(path) == target["id"]:
+        return path
+    return store.find_raw(root, target["connector"], target["id"]) or path
+
+
+def unlink_annotations(root: Path, db: sqlite3.Connection, doc_id: str) -> list[str]:
+    """Drop the Obsidian link from every annotation of `doc_id` (called by rm).
+
+    The link is a pointer tars derived — its stem is the target's file name,
+    made from its title — not the user's words, so removing it doesn't touch
+    what they wrote. It must go with the target: a title being redacted (a
+    pasted secret) would otherwise live on in the kept annotations, and the
+    link would dangle in Obsidian. Returns the ids of the annotations kept.
+    """
+    kept = []
+    for row in annotations_of(db, doc_id):
+        def locate(raw_dir=row["raw_dir"]) -> Path:
+            return root / raw_dir
+
+        def change(doc: RawDoc) -> bool:
+            dropped = doc.annotates is not None
+            doc.annotates = None
+            return dropped
+
+        _rewrite_locked(root, db, locate, change)
+        kept.append(row["id"])
+    return kept
 
 
 def annotations_of(db: sqlite3.Connection, doc_id: str) -> list[sqlite3.Row]:
