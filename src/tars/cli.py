@@ -69,12 +69,23 @@ def init(path: Path):
                    "Prepends a 'Concepts:' wiki-link line so the vault graph clusters.")
 @click.option("--append", "append", is_flag=True,
               help="Append the text to the end of the existing document with this "
-                   "--origin (read + write under one DB lock); a plain add if none exists.")
+                   "--origin (read + write under one DB lock), keeping the title and "
+                   "tags it doesn't restate. Fails if no document has that origin.")
+@click.option("--create", "create", is_flag=True,
+              help="With --append: start the document if it doesn't exist yet "
+                   "(e.g. the first entry of the day).")
 def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | None,
-        connector_override: str | None, concepts: tuple[str, ...], append: bool):
-    """Capture TARGET: a URL, a file path, or '-' for pasted text on stdin."""
+        connector_override: str | None, concepts: tuple[str, ...], append: bool,
+        create: bool):
+    """Capture TARGET: a URL, a file path, or '-' for pasted text on stdin.
+
+    Your words are never replaced: re-adding different text to an existing
+    note/agent/activity document is refused — use --append to add to it.
+    """
     if append and not origin:
         raise click.ClickException("--append requires --origin (the document to append to)")
+    if create and not append:
+        raise click.ClickException("--create only applies with --append")
     root, db = _open()
     resolved = _try(lambda: ingest.resolve_target(target, stdin=sys.stdin, origin=origin))
     extracted = resolved.extracted
@@ -89,9 +100,18 @@ def add(target: str, title: str | None, tags: tuple[str, ...], origin: str | Non
     )
     try:
         doc_id, status = ingest.add(root, db, doc, extracted.source_bytes,
-                                    extracted.source_ext, append=append)
+                                    extracted.source_ext, append=append,
+                                    create=create or not append)
     except store.UnparseableRaw as exc:  # appending to a doc whose raw file is broken
         raise click.ClickException(f"{exc} — repair it before writing to this document")
+    except ingest.WouldReplace as exc:
+        raise click.ClickException(
+            f"{exc}; your words are never replaced — add to it with --append, "
+            f"or capture a new note with a different --origin")
+    except ingest.NoSuchDocument as exc:
+        raise click.ClickException(
+            f"{exc} to append to — check the origin (tars list), or pass --create "
+            f"to start it")
     click.echo(f"{status}  {doc_id}  [{doc.connector}] {doc.title or doc.origin}")
 
 
@@ -572,7 +592,8 @@ def normalize():
         doc = store.read_raw(content_md)
         before = doc.text
         if normalize_mod.apply(before, rules, doc.connector) != before:
-            _, status = ingest.add(root, db, doc)  # add() re-applies + rewrites raw + reindexes
+            # normalize is a sanctioned rewrite of authored text
+            _, status = ingest.add(root, db, doc, replace=True)
             if status != "unchanged":
                 changed += 1
                 click.echo(f"  normalized {doc.id}  {content_md.name}")

@@ -17,7 +17,7 @@ def root(tmp_path, monkeypatch):
 
 def test_log_records_lifecycle_and_skips_unchanged(root):
     path, runner = root
-    args = ["add", "-", "--origin", "note:life", "--title", "Life"]
+    args = ["add", "-", "--connector", "jira", "--origin", "jira:LIFE-1", "--title", "Life"]
     first = runner.invoke(main, args, input="first")
     doc_id = first.output.split()[1]
     runner.invoke(main, args, input="first")     # unchanged -> must NOT log

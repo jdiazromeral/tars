@@ -43,14 +43,20 @@ tars.db                           disposable index — tars reindex rebuilds it
   synthesis — always *through* the CLI for `raw/` and `tars.db`; the `wiki/`
   and `tasks/` layers are agent-edited markdown.
 - **Ingestion is idempotent**, keyed by `(connector, origin)`. Re-adding
-  unchanged content is a no-op; changed content is an upsert. New connectors
-  must preserve this (see `src/tars/connectors/__init__.py`). The `origin` is
+  unchanged content is a no-op; changed content from a *synced* source is an
+  upsert. New connectors must preserve this (see `src/tars/connectors/__init__.py`). The `origin` is
   always a **stable, source-native id** (`jira:<KEY>`, `granola:<id>`, a URL,
   `note:<content-hash>`, `agent:<slug>`, `file:<content-hash>`) — never a timestamp or a local
   path, so re-capture never mints a duplicate (the path lives in `meta`). The one
   deliberate exception is `activity:<YYYY-MM-DD>`: there the day *is* the
-  record's identity (one mutable document per day). Identity lives in `origin`; change-detection in
+  record's identity (one growing document per day). Identity lives in `origin`; change-detection in
   `content_hash`; the sync cursor is only a fetch optimization.
+- **Authored text only grows.** For text written here — `note`, `agent`,
+  `activity` — a re-add with different text is **refused**, never applied:
+  add to it with `--append` (which keeps the title and tags it doesn't
+  restate), or capture a new note. `--append` to an origin that holds nothing
+  fails unless `--create` (track's first entry of the day). Only `tars
+  normalize` may rewrite authored text, as a sanctioned vocab fix.
 - **Mutable sources go stale; refresh them by id.** A Jira issue keeps changing
   after ingest (comments, status, state). The incremental watermark only
   *discovers* changes for items in scope (e.g. assigned to me); an item pulled
@@ -203,9 +209,9 @@ properties — keep them straight:
   `tars:capture`) and available from any directory once installed — they
   resolve the vault through `TARS_HOME`, same as the CLI.
 - Conventional Commits.
-- CLI usage: `tars add <url|file|-> [--append]` (`--append` adds the text to
-  the end of the existing document for `--origin`, read and write under one DB
-  lock; a plain add if none exists), `tars sweep`, `tars tag|untag <doc_id>
+- CLI usage: `tars add <url|file|-> [--append [--create]]` (`--append` adds the
+  text to the end of the existing document for `--origin`, read and write under
+  one DB lock; fails if none exists unless `--create`), `tars sweep`, `tars tag|untag <doc_id>
   --concept ...`, `tars hubs`, `tars search <query> [-v] [--json]` (`-v` adds
   each hit's best-matching chunk — usually enough to answer from),
   `tars show <doc_id> [--path | --head N | --grep <regex> [-C N]]` (token-frugal

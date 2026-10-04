@@ -139,10 +139,13 @@ words**, lightly shaped — this is their record, not your summary of it.
      it as the next line under `## Entries`.
 
    ```sh
-   tars add - --append --connector activity --origin "activity:<YYYY-MM-DD>" \
+   tars add - --append --create --connector activity --origin "activity:<YYYY-MM-DD>" \
      --title "<YYYY-MM-DD> Activity" --tag activity --concept activity-log \
      < /path/to/scratch.md
    ```
+
+   `--create` lets the first entry of the day start the record; without it,
+   `--append` to a missing day fails rather than guessing.
 
    Write the body to a scratch file and redirect it — heredocs mangle special
    characters.

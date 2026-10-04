@@ -115,11 +115,12 @@ def test_reingest_keeps_its_own_unsuffixed_name(root):
     # Guard the ownership short-circuit: a doc that already owns the plain
     # name must not drift to a suffixed one when its content is updated.
     path, runner = root
-    runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "Alpha"], input="v1")
-    runner.invoke(main, ["add", "-", "--origin", "note:a", "--title", "Alpha"], input="v2")
+    slot = ["--connector", "jira", "--origin", "jira:A-1", "--title", "Alpha"]
+    runner.invoke(main, ["add", "-", *slot], input="v1")
+    runner.invoke(main, ["add", "-", *slot], input="v2")
 
-    assert "v2" in (path / "raw/note/alpha.md").read_text()
-    assert sorted(p.name for p in path.glob("raw/note/alpha*.md")) == ["alpha.md"]
+    assert "v2" in (path / "raw/jira/alpha.md").read_text()
+    assert sorted(p.name for p in path.glob("raw/jira/alpha*.md")) == ["alpha.md"]
 
 
 def test_db_drift_when_raw_file_missing_from_index(root):

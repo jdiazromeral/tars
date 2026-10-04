@@ -83,10 +83,31 @@ def chunk_text(text: str, target: int = CHUNK_TARGET) -> list[str]:
     return chunks
 
 
+# Connectors whose text is authored here — your notes, agent work records, the
+# day's activity — rather than synced from a source that owns it. Their text
+# only grows: a re-add with different text is refused (WouldReplace), never
+# applied. A synced source (jira, gmail, web, ...) refreshes in place.
+AUTHORED_CONNECTORS = frozenset({"note", "agent", "activity"})
+
+
+class WouldReplace(Exception):
+    """A re-add would replace authored text; append to it or use a new origin."""
+
+
+class NoSuchDocument(Exception):
+    """`append` without `create` named a slot that holds no document."""
+
+
 def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
         source_bytes: bytes | None = None, source_ext: str | None = None,
-        concepts_mode: str = "merge", append: bool = False) -> tuple[str, str]:
+        concepts_mode: str = "merge", append: bool = False, create: bool = True,
+        replace: bool = False) -> tuple[str, str]:
     """Ingest one document. Returns (doc_id, status) with status in added/updated/unchanged.
+
+    Adds never replace authored text: for a connector in AUTHORED_CONNECTORS,
+    re-adding *different* text to an existing document raises WouldReplace
+    unless `replace=True` (only `tars normalize`, a sanctioned rewrite, passes
+    it). A re-add that doesn't restate the title (None) keeps the stored one.
 
     Concepts are shelving state, not content: by default (`concepts_mode="merge"`)
     a re-ingest unions the incoming concepts with the stored ones, so a re-sync
@@ -104,7 +125,10 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     replacement: the existing raw text is read inside that same transaction and
     `doc.text` is joined to its end with one newline, so two concurrent appends
     can't lose each other. With no existing document it is a plain add, and
-    re-appending lines the body already ends with is a no-op.
+    re-appending lines the body already ends with is a no-op. An append also
+    keeps the stored title, tags and meta it doesn't restate (tags merge). With
+    `create=False`, appending to a slot that holds nothing raises
+    NoSuchDocument instead of starting a new document from a typo.
 
     The ingestion event is logged before the raw write (see `ingestlog`) and
     inside the write lock, so the log's order matches the commit order.
@@ -122,10 +146,16 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
     db.execute("BEGIN IMMEDIATE")
     try:
         existing = db.execute(
-            "SELECT content_hash, raw_dir, concepts FROM documents WHERE id = ?", (doc.id,)
+            "SELECT content_hash, raw_dir, concepts, title FROM documents WHERE id = ?",
+            (doc.id,),
         ).fetchone()
+        if append and not existing and not create:
+            raise NoSuchDocument(f"no document at {doc.origin}")
+        if existing and doc.title is None:
+            doc.title = existing["title"]
         if existing and append:
-            previous = store.read_raw(root / existing["raw_dir"]).text
+            stored_doc = store.read_raw(root / existing["raw_dir"])
+            previous = stored_doc.text
             # A retried append (the command ran, the caller never saw the output)
             # must not duplicate its lines; matching whole trailing lines keeps it
             # a no-op without swallowing a fragment that merely ends a longer line.
@@ -133,7 +163,13 @@ def add(root: Path, db: sqlite3.Connection, doc: RawDoc,
                 doc.text = f"{previous}\n{doc.text}".strip("\n")
             else:
                 doc.text = previous
+            doc.tags = list(dict.fromkeys(stored_doc.tags + doc.tags))
+            doc.meta = {**stored_doc.meta, **doc.meta}
         digest = store.content_hash(doc.text)
+        if (existing and not append and not replace
+                and doc.connector in AUTHORED_CONNECTORS
+                and existing["content_hash"] != digest):
+            raise WouldReplace(f"{doc.origin} already holds different text")
         if existing and concepts_mode == "merge":
             stored = json.loads(existing["concepts"] or "[]")
             doc.concepts = list(dict.fromkeys(stored + doc.concepts))

@@ -94,8 +94,10 @@ def test_add_note_and_search(root):
 
 
 def test_ingest_is_idempotent(root):
+    # Update mechanics on a synced source; authored text is refused instead
+    # (see test_adds_never_replace.py).
     _, runner = root
-    args = ["add", "-", "--origin", "note:same"]
+    args = ["add", "-", "--connector", "jira", "--origin", "jira:SAME-1"]
     first = runner.invoke(main, args, input="same text")
     second = runner.invoke(main, args, input="same text")
     changed = runner.invoke(main, args, input="different text now")
@@ -361,8 +363,9 @@ def test_concepts_and_slug_collision(root):
     assert len(files) == 2
     assert "we discussed the glossary rollout" in doc.read_text()  # first file intact
 
-    # filename is fixed at first ingest: content update must not move the file
-    runner.invoke(main, ["add", "-", "--title", "Weekly Sync renamed",
+    # filename is fixed at first ingest: a content change under a new title
+    # must not move the file
+    runner.invoke(main, ["add", "-", "--title", "Weekly Sync renamed", "--append",
                          "--origin", "note:w1"], input="updated content")
     assert "updated content" in doc.read_text()
     assert not (path / "raw/note/weekly-sync-renamed.md").exists()
@@ -1054,7 +1057,8 @@ def test_list_since_filters_by_captured_at(root):
 
 
 def _append(runner, text, *extra):
-    return runner.invoke(main, ["add", "-", "--append", "--origin", "activity:2026-10-01",
+    return runner.invoke(main, ["add", "-", "--append", "--create",
+                                "--origin", "activity:2026-10-01",
                                 "--connector", "activity", "--title", "2026-10-01 Activity",
                                 *extra], input=text)
 
@@ -1074,7 +1078,7 @@ def test_append_extends_existing_text_and_keeps_one_concepts_line(root):
                     "- 09:00 one\n- 10:00 two\n- 10:00 three\n- 10:00 four")
 
 
-def test_append_without_existing_doc_is_a_plain_add(root):
+def test_append_with_create_and_no_existing_doc_is_a_plain_add(root):
     path, runner = root
     res = _append(runner, "- only entry")
     assert res.output.startswith("added")
@@ -1111,7 +1115,7 @@ def test_concurrent_appends_do_not_lose_entries(root):
         conn = database.connect(path)
         doc = store.RawDoc(connector="activity", origin="activity:2026-10-01",
                            text=f"- entry {n}", title="2026-10-01 Activity")
-        ingest.add(path, conn, doc, append=True)
+        ingest.add(path, conn, doc, append=True, create=False)
         conn.close()
 
     threads = [threading.Thread(target=append_entry, args=(n,)) for n in range(4)]
