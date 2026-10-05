@@ -46,6 +46,18 @@ def as_date(value):
         return None
 
 
+def has_sessions(day_dir):
+    """A day is only worth reviewing if something in it was staged."""
+    for path in glob.glob(os.path.join(day_dir, "*.json")):
+        try:
+            with open(path) as f:
+                if json.load(f).get("prompts"):
+                    return True
+        except (OSError, ValueError, AttributeError):
+            continue
+    return False
+
+
 def short(text, n=110):
     return text if len(text) <= n else text[: n - 1] + "…"
 
@@ -62,7 +74,10 @@ def main():
 
     overdue, soon, stale = [], [], 0
     for path in glob.glob(os.path.join(TARS_HOME, "tasks", "2*.md")):
-        parsed = parse(path)
+        try:
+            parsed = parse(path)
+        except (OSError, ValueError):
+            continue  # one unreadable task file never silences the whole summary
         if not parsed or parsed[0].get("status") != "open":
             continue
         fm, action = parsed
@@ -76,8 +91,8 @@ def main():
             stale += 1
 
     unreviewed = sorted(
-        d for d in (os.path.basename(p) for p in glob.glob(os.path.join(STAGING, "2*")))
-        if d < today.isoformat()
+        os.path.basename(d) for d in glob.glob(os.path.join(STAGING, "2*"))
+        if os.path.basename(d) < today.isoformat() and has_sessions(d)
     )
 
     lines = []

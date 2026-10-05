@@ -100,9 +100,11 @@ that's exactly right; just know the proxy.
    branch, path and prompts), `prompts` (the first few), `last_prompt`, and
    `first_seen`/`last_seen`. It is **evidence, not the record** — activity is
    the user's words, and a session's wall-clock span is never a duration.
-   - Read every day directory up to and including today, skipping
-     `reviewed/`. Earlier days are reviews that were skipped — say so, and
-     review them oldest first.
+   - Read every `<YYYY-MM-DD>/` directory up to and including today (never
+     `reviewed/` or `sessions/` — the latter is the hook's own read offsets).
+     Earlier days are reviews that were skipped — say so, and review them
+     oldest first. This session is not among them: once a session runs
+     end-of-day, the hook stages nothing more from it that day.
    - Group sessions by ticket, else by repo. Drop plumbing — sessions whose
      only prompts are vault chores (`/tars:*` runs, syncs) — unless the user
      counts them.
@@ -118,9 +120,9 @@ that's exactly right; just know the proxy.
    - Once a day is resolved (entries written or explicitly declined), move its
      files into `reviewed/<YYYY-MM-DD>/` under the staging dir (create it;
      replace a same-named file — the newer one is further along), then remove
-     the empty day directory. Moving, not deleting, is load-bearing: a session
-     still running after today's review resumes from its reviewed offset, so
-     only its *new* prompts are staged and nothing is proposed twice.
+     the empty day directory. Moving, not deleting, is load-bearing: the hook
+     never re-stages a prompt it finds under `reviewed/`, so another session
+     still running after today's review adds only its *new* prompts.
    - **Non-interactive run** (no user to answer — e.g. a scheduled headless
      job): list the proposals only; write nothing, move nothing.
 
