@@ -265,7 +265,9 @@ Nothing staged is a record. `end-of-day` proposes one activity line per ticket
 (or repo) from the staged sessions, writes only the lines you confirm through
 `track`, and then moves the day under `reviewed/` so it is never proposed
 twice. Set `TARS_EOD_HEADLESS=1` for scheduled runs: the hooks stay out of them,
-and the skill only lists its proposals.
+and the skill only lists its proposals. If you ran these hooks from
+`~/.claude/settings.json` before they shipped here, remove those entries — with
+the plugin enabled, both copies would fire.
 
 ### Vault house rules (`AGENTS.md`)
 
