@@ -49,6 +49,29 @@ def git(cwd, *args):
         return ""
 
 
+def where(cwd):
+    """(repo, worktree, branch) for cwd, each None when it doesn't apply."""
+    # One call; --show-superproject-working-tree prints a line only inside a submodule.
+    out = git(cwd, "rev-parse", "--path-format=absolute", "--show-toplevel",
+              "--git-common-dir", "--abbrev-ref", "HEAD", "--show-superproject-working-tree")
+    lines = out.splitlines()
+    if len(lines) < 3:
+        return None, None, None  # not a repo, or inside a bare repo's own dir
+    top, common, branch, *superproject = lines
+    if superproject:
+        # A submodule's common dir is <super>/.git/modules/<path>: name it by its checkout.
+        return os.path.basename(top), None, branch
+    if os.path.basename(common) == ".git":
+        main_root = os.path.dirname(common)  # a checkout, or a worktree of one
+    else:
+        main_root = common  # bare: fever2.git, or a hidden proj/.bare
+    name = os.path.basename(main_root)
+    if name.startswith("."):
+        name = os.path.basename(os.path.dirname(main_root))
+    name = name.removesuffix(".git")
+    return name, (os.path.basename(top) if top != main_root else None), branch
+
+
 def tickets_in(text, pattern=TICKET):
     keys = {t.upper() for t in pattern.findall(text or "")}
     return {t for t in keys if t.split("-")[0] not in NOT_TICKETS}
@@ -188,18 +211,8 @@ def stage(sid, cwd, day, now, new_prompts):
     if not prompts:
         return  # nothing typed that isn't already reviewed: no record, no empty day dir
 
-    top = git(cwd, "rev-parse", "--show-toplevel")
-    # --git-common-dir resolves a worktree back to its main repo's .git
-    common = git(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    main_root = os.path.dirname(common) if common else ""
-    branch = git(cwd, "rev-parse", "--abbrev-ref", "HEAD")
-    worktree = os.path.basename(top) if top and main_root and main_root != top else None
-    loc = {
-        "cwd": cwd,
-        "repo": os.path.basename(main_root) if main_root else None,
-        "worktree": worktree,
-        "branch": branch or None,
-    }
+    repo, worktree, branch = where(cwd)
+    loc = {"cwd": cwd, "repo": repo, "worktree": worktree, "branch": branch}
     locs = rec.get("locations", [])
     if loc not in locs:
         locs.append(loc)
