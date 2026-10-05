@@ -254,3 +254,43 @@ def test_pending_without_a_vault_is_silent(tmp_path):
     (tmp_path / "staging" / "2020-01-01").mkdir(parents=True)
     out = run_hook("pending.py", tmp_path)
     assert out.returncode == 0 and out.stdout == ""
+
+
+def test_repo_is_named_right_in_every_git_layout(tmp_path, monkeypatch):
+    for var, value in (("NAME", "t"), ("EMAIL", "t@t")):
+        monkeypatch.setenv(f"GIT_AUTHOR_{var}", value)
+        monkeypatch.setenv(f"GIT_COMMITTER_{var}", value)
+
+    def g(*args):
+        subprocess.run(["git", "-c", "protocol.file.allow=always", *args], check=True,
+                       capture_output=True, cwd=tmp_path)
+
+    g("init", "-q", "-b", "main", "sub")
+    g("-C", "sub", "commit", "-q", "--allow-empty", "-m", "s")
+    g("init", "-q", "-b", "main", "fever2")
+    g("-C", "fever2", "commit", "-q", "--allow-empty", "-m", "i")
+    g("-C", "fever2", "submodule", "-q", "add", str(tmp_path / "sub"), "libs/sub")
+    g("-C", "fever2", "worktree", "add", "-q", "../fever2-wt", "-b", "deseo-1343-x")
+    g("clone", "-q", "--bare", "fever2", "fever3.git")
+    g("-C", "fever3.git", "worktree", "add", "-q", "../fever3-main", "main")
+    g("clone", "-q", "--bare", "fever2", "proj/.bare")
+    (tmp_path / "proj" / ".git").write_text("gitdir: ./.bare\n")
+    g("-C", "proj", "worktree", "add", "-q", "feat-a", "-b", "feat-a")
+
+    expected = {
+        "fever2": ("fever2", None, "main"),
+        "fever2/libs/sub": ("sub", None, "main"),
+        "fever2-wt": ("fever2", "fever2-wt", "deseo-1343-x"),
+        "fever3-main": ("fever3", "fever3-main", "main"),
+        "proj/feat-a": ("proj", "feat-a", "feat-a"),
+        "fever3.git": (None, None, None),
+    }
+    transcript = tmp_path / "t.jsonl"
+    for i, (rel, want) in enumerate(expected.items()):
+        sid = f"s{i}"
+        write_transcript(transcript, [user(f"work in {rel}")])
+        run_hook("session_log.py", tmp_path, {
+            "session_id": sid, "cwd": str(tmp_path / rel), "transcript_path": str(transcript),
+        })
+        loc = staged(tmp_path, sid)["locations"][0]
+        assert (loc["repo"], loc["worktree"], loc["branch"]) == want, rel
