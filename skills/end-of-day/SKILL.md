@@ -1,6 +1,6 @@
 ---
 name: end-of-day
-description: End-of-day review — sync today's work in, then show what you did today (by concept) alongside what's open for tomorrow. A planning pass, NOT the digest — its only writes are the sync it starts with (which also labels Gmail threads) and optional task extraction. Trigger on "end of day", "eod", "what did I do today", "wrap up my day", "plan my tomorrow", "daily review".
+description: End-of-day review — sync today's work in, then show what you did today (by concept) alongside what's open for tomorrow. A planning pass, NOT the digest — its only writes are the sync it starts with (which also labels Gmail threads), the activity entries you confirm from staged agent sessions, and optional task extraction. Trigger on "end of day", "eod", "what did I do today", "wrap up my day", "plan my tomorrow", "daily review".
 ---
 
 # End-of-day review
@@ -25,13 +25,14 @@ the next. It is **not** the digest and must never behave like one:
   "What did I do today" must read the same whether you run it at 18:00 or again
   at 20:00; a watermark would make the second run show "nothing new." Re-running
   is safe and idempotent by design.
-- **It writes in two places only.** Step 1's sync (`sync-all`) captures and
+- **It writes in three places only.** Step 1's sync (`sync-all`) captures and
   shelves new documents, creates concept and people pages, regenerates concept
   hubs (`tars finalize`), advances connector cursors, and labels synced Gmail
   threads in the user's mailbox — say so when offering it, and skip it on
-  request, which leaves this pass read-only. Then optional, additive task
-  extraction (step 4, via the `tasks` skill), which never flips status or
-  deletes. Everything else is reads.
+  request. Then activity entries the user confirmed from staged sessions
+  (step 4, via the `track` skill), and optional, additive task extraction
+  (step 5, via the `tasks` skill), which never flips status or deletes. Skip
+  all three and this pass is read-only. Everything else is reads.
 
 ## Why sync comes first (the load-bearing mechanic)
 
@@ -91,23 +92,57 @@ that's exactly right; just know the proxy.
      usually fine; they're short.
    - `tars log --json` distinguishes added vs updated when a line needs it.
 
-4. **Extract today's commitments (offer, don't force).** If today's captures
+4. **Turn staged agent sessions into activity (propose, never write unasked).**
+   The plugin's `Stop` hook (`hooks/session_log.py`) stages one JSON file per
+   agent session per day under
+   `${TARS_ACTIVITY_STAGING:-~/.claude/state/tars-activity}/<YYYY-MM-DD>/<session_id>.json`:
+   `locations` (cwd, repo, worktree, branch), `tickets` (keys seen in the
+   branch, path and prompts), `prompts` (the first few), `last_prompt`, and
+   `first_seen`/`last_seen`. It is **evidence, not the record** — activity is
+   the user's words, and a session's wall-clock span is never a duration.
+   - Read every day directory up to and including today, skipping
+     `reviewed/`. Earlier days are reviews that were skipped — say so, and
+     review them oldest first.
+   - Group sessions by ticket, else by repo. Drop plumbing — sessions whose
+     only prompts are vault chores (`/tars:*` runs, syncs) — unless the user
+     counts them.
+   - Propose one line per group — `DESEO-1343 — fever2 worktree — "implement
+     marketplace redirect"` — and ask the user to confirm, reword, merge or
+     drop, in **one** prompt per day. Resolve keys and bare descriptions
+     exactly as the `track` skill prescribes; the duration stays `—` unless
+     the user gives one.
+   - Write the confirmed lines through the `track` skill into **that day's**
+     activity record (the staged day, not today, when reviewing a skipped day).
+   - For each ticket key that matches an open task file, ask whether the task
+     is done — flipping status is the user's call, applied only on their answer.
+   - Once a day is resolved (entries written or explicitly declined), move its
+     files into `reviewed/<YYYY-MM-DD>/` under the staging dir (create it;
+     replace a same-named file — the newer one is further along), then remove
+     the empty day directory. Moving, not deleting, is load-bearing: a session
+     still running after today's review resumes from its reviewed offset, so
+     only its *new* prompts are staged and nothing is proposed twice.
+   - **Non-interactive run** (no user to answer — e.g. a scheduled headless
+     job): list the proposals only; write nothing, move nothing.
+
+5. **Extract today's commitments (offer, don't force).** If today's captures
    hold concrete new commitments (a meeting "next step", an explicit promise),
    offer to run the `tasks` skill over just those sources. It is idempotent and
    additive — dedupe against `tasks/` first, create one file per commitment,
    never flip status. This is what makes tomorrow's plan actionable; skip it if
    nothing durable surfaced (daily standups rarely yield real tasks).
 
-5. **Forward — what's open for tomorrow.** Read `tasks/TASKS.md` (regenerate it
-   first if step 4 added anything): lead with `## ⚠ Overdue`, then your
+6. **Forward — what's open for tomorrow.** Read `tasks/TASKS.md` (regenerate it
+   first if step 5 added anything): lead with `## ⚠ Overdue`, then your
    due-soon `## Mine`. Add loose ends spotted in today's captures that aren't
    tasks yet — a PR still awaiting review, an unanswered thread, a decision left
    hanging.
 
-6. **Show a scratch summary in chat** — not a file:
+7. **Show a scratch summary in chat** — not a file:
    - **Tracked today** — the activity record's entries as logged (ticket,
      duration, what was done), first, because it is the only first-hand band.
      Omit the section when nothing was tracked.
+   - **Staged sessions** — step 4's proposals and what became of them
+     (logged / reworded / dropped / still pending). Omit when nothing was staged.
    - **Done today** — grouped by concept (the vault's spine), each line ending
      in its `[[<file-stem>|<title>]]` source link; a backfill collapses to one
      counted line.

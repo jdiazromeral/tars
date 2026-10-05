@@ -249,6 +249,24 @@ not summed in — that would double-count), and name the days with nothing track
 rather than passing a gap off as an empty day. `end-of-day` reads the same record
 as its first band.
 
+You don't have to remember to say it. The plugin ships two hooks
+(`hooks/hooks.json`, loaded with the skills):
+
+- **`Stop` → `hooks/session_log.py`** stages *evidence* of each agent session —
+  repo, worktree, branch, ticket keys and your first few prompts — as one JSON
+  file per session per day under `~/.claude/state/tars-activity/<date>/`
+  (`TARS_ACTIVITY_STAGING` overrides). It runs in the background, reads only
+  the transcript bytes added since the last turn, and never blocks or prints.
+- **`SessionStart` → `hooks/pending.py`**, on the first startup of the day,
+  shows overdue and due-soon tasks and names any past days of staged sessions
+  nobody reviewed.
+
+Nothing staged is a record. `end-of-day` proposes one activity line per ticket
+(or repo) from the staged sessions, writes only the lines you confirm through
+`track`, and then moves the day under `reviewed/` so it is never proposed
+twice. Set `TARS_EOD_HEADLESS=1` for scheduled runs: the hooks stay out of them,
+and the skill only lists its proposals.
+
 ### Vault house rules (`AGENTS.md`)
 
 Drop an `AGENTS.md` at your vault root (`$TARS_HOME/AGENTS.md`) to steer the
